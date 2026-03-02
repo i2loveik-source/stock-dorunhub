@@ -142,7 +142,7 @@ export default function App() {
         <Company companyId={selectedCompany} onBack={() => setSelectedCompany(null)} />
       ) : (
         <>
-          {page === "market" && <Market onSelect={setSelectedCompany} />}
+          {page === "market" && <Market onSelect={setSelectedCompany} onLogout={() => { clearToken(); setLoggedIn(false); }} />}
           {page === "portfolio" && <Portfolio />}
           {page === "news" && <News />}
           {page === "admin" && <Admin />}

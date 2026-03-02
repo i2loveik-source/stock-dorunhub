@@ -60,19 +60,43 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
 router.get("/companies/pending", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    if (!["관리자", "org_issuer", "platform_admin"].includes(user.role)) {
+
+    // DB에서 실제 coin_role 확인
+    const roleCheck = await sql`
+      SELECT role FROM economy.coin_roles WHERE user_id::text = ${user.userId}
+      ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END LIMIT 1
+    `;
+    const actualRole = roleCheck[0]?.role || user.role;
+    const isPlatformAdmin = actualRole === "platform_admin";
+
+    if (!isPlatformAdmin && !["관리자", "org_issuer"].includes(user.role)) {
       return res.status(403).json({ error: "관리자만 접근 가능" });
     }
-    const orgId = user.organizationId;
-    const companies = await sql`
-      SELECT c.*, u.username as ceo_username, u.full_name as ceo_name,
-             at.symbol as coin_symbol
-      FROM investment.companies c
-      LEFT JOIN public.users u ON c.ceo_user_id = u.id
-      LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
-      WHERE c.organization_id = ${orgId} AND c.status = 'pending'
-      ORDER BY c.created_at DESC
-    `;
+
+    // platform_admin: 전체 pending, 그 외: 내 조직만
+    const companies = isPlatformAdmin
+      ? await sql`
+          SELECT c.*, u.username as ceo_username,
+                 CONCAT(u.last_name, u.first_name) as ceo_name,
+                 at.symbol as coin_symbol, s.name as org_name
+          FROM investment.companies c
+          LEFT JOIN public.users u ON c.ceo_user_id = u.id
+          LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
+          LEFT JOIN public.schools s ON s.id = c.organization_id
+          WHERE c.status = 'pending'
+          ORDER BY c.created_at DESC
+        `
+      : await sql`
+          SELECT c.*, u.username as ceo_username,
+                 CONCAT(u.last_name, u.first_name) as ceo_name,
+                 at.symbol as coin_symbol, s.name as org_name
+          FROM investment.companies c
+          LEFT JOIN public.users u ON c.ceo_user_id = u.id
+          LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
+          LEFT JOIN public.schools s ON s.id = c.organization_id
+          WHERE c.organization_id = ${user.organizationId} AND c.status = 'pending'
+          ORDER BY c.created_at DESC
+        `;
     res.json(companies);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
