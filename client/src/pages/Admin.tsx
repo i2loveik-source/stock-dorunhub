@@ -19,9 +19,11 @@ export default function Admin() {
   });
 
   const load = async () => {
+    // orgId 없는 platform_admin은 "all"로 전체 코인 조회
+    const orgId = user?.orgId || "all";
     const [p, c] = await Promise.all([
       api("/api/companies/pending"),
-      api(`/api/internal/org-coins/${user?.orgId}`).catch(() => []),
+      api(`/api/internal/org-coins/${orgId}`).catch(() => []),
     ]);
     if (Array.isArray(p)) setPending(p);
     if (Array.isArray(c)) setOrgCoins(c);
@@ -179,7 +181,11 @@ export default function Admin() {
           </div>
           <select className={inp} value={createForm.assetTypeId} onChange={e => setCreateForm(p => ({ ...p, assetTypeId: e.target.value }))}>
             <option value="">코인 종류 선택 *</option>
-            {orgCoins.map((c: any) => <option key={c.id} value={c.id}>{c.name} ({c.symbol})</option>)}
+            {orgCoins.map((c: any) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.symbol}){c.org_name ? ` — ${c.org_name}` : ""}
+              </option>
+            ))}
           </select>
           <button onClick={createCompany} className={btnPri}>🏢 회사 등록 (즉시 상장)</button>
         </div>
