@@ -5,10 +5,11 @@ import bcrypt from "bcrypt";
 
 const router = Router();
 
-// 공통: 유저 정보 + 역할 조회 헬퍼
-async function fetchUserInfo(condition: string, value: string) {
+// 공통 유저 조회 쿼리 (username 기준)
+async function getUserByUsername(username: string) {
   return sql`
-    SELECT u.id, u.username, u.password, u.full_name, u.school_id,
+    SELECT u.id, u.username, u.password, u.school_id,
+           CONCAT(u.last_name, u.first_name) as full_name,
            s.name as org_name,
            uo.role as org_role, uo.organization_id,
            cr.role as coin_role
@@ -19,7 +20,27 @@ async function fetchUserInfo(condition: string, value: string) {
       AND uo.is_approved = true
       AND uo.organization_id = u.school_id
     LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
-    WHERE u.username = ${value}
+    WHERE u.username = ${username}
+    LIMIT 1
+  `;
+}
+
+// 공통 유저 조회 쿼리 (id 기준)
+async function getUserById(userId: string) {
+  return sql`
+    SELECT u.id, u.username, u.school_id,
+           CONCAT(u.last_name, u.first_name) as full_name,
+           s.name as org_name,
+           uo.role as org_role, uo.organization_id,
+           cr.role as coin_role
+    FROM public.users u
+    LEFT JOIN public.schools s ON u.school_id = s.id
+    LEFT JOIN public.user_organizations uo
+      ON uo.user_id::text = u.id::text
+      AND uo.is_approved = true
+      AND uo.organization_id = u.school_id
+    LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
+    WHERE u.id::text = ${userId}
     LIMIT 1
   `;
 }
@@ -30,6 +51,17 @@ function resolveRole(u: any): string {
   return u.org_role || "member";
 }
 
+function buildUserResponse(u: any) {
+  return {
+    id: u.id,
+    username: u.username,
+    fullName: u.full_name,
+    orgName: u.org_name,
+    orgId: u.organization_id || u.school_id,
+    role: resolveRole(u),
+  };
+}
+
 // 직접 로그인 (두런 허브/코인 계정)
 // POST /auth/login
 router.post("/auth/login", async (req: Request, res: Response) => {
@@ -37,26 +69,11 @@ router.post("/auth/login", async (req: Request, res: Response) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: "아이디와 비밀번호 필요" });
 
-    const users = await sql`
-      SELECT u.id, u.username, u.password, u.full_name, u.school_id,
-             s.name as org_name,
-             uo.role as org_role, uo.organization_id,
-             cr.role as coin_role
-      FROM public.users u
-      LEFT JOIN public.schools s ON u.school_id = s.id
-      LEFT JOIN public.user_organizations uo
-        ON uo.user_id::text = u.id::text
-        AND uo.is_approved = true
-        AND uo.organization_id = u.school_id
-      LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
-      WHERE u.username = ${username}
-      LIMIT 1
-    `;
-
+    const users = await getUserByUsername(username);
     if (users.length === 0) return res.status(401).json({ error: "아이디 또는 비밀번호가 틀렸습니다" });
     const u = users[0];
 
-    // 비밀번호 확인 (bcrypt 또는 평문)
+    // 비밀번호 확인
     let valid = false;
     try {
       if (u.password?.startsWith("$2")) {
@@ -69,31 +86,21 @@ router.post("/auth/login", async (req: Request, res: Response) => {
     }
     if (!valid) return res.status(401).json({ error: "아이디 또는 비밀번호가 틀렸습니다" });
 
-    const role = resolveRole(u);
+    const userInfo = buildUserResponse(u);
     const token = generateStockToken({
       userId: u.id,
-      role,
-      organizationId: u.organization_id || u.school_id,
+      role: userInfo.role,
+      organizationId: userInfo.orgId,
       username: u.username,
     });
 
-    res.json({
-      token,
-      user: {
-        id: u.id,
-        username: u.username,
-        fullName: u.full_name,
-        orgName: u.org_name,
-        orgId: u.organization_id || u.school_id,
-        role,
-      },
-    });
+    res.json({ token, user: userInfo });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// SSO 로그인 (두런 코인/허브 토큰)
+// SSO 로그인 (두런 코인/허브 JWT 토큰)
 // GET /auth/sso?sso_token=...
 router.get("/auth/sso", async (req: Request, res: Response) => {
   try {
@@ -103,43 +110,19 @@ router.get("/auth/sso", async (req: Request, res: Response) => {
     const decoded = verifySsoToken(sso_token);
     if (!decoded) return res.status(401).json({ error: "유효하지 않은 토큰" });
 
-    const users = await sql`
-      SELECT u.id, u.username, u.full_name, u.school_id,
-             s.name as org_name,
-             uo.role as org_role, uo.organization_id,
-             cr.role as coin_role
-      FROM public.users u
-      LEFT JOIN public.schools s ON u.school_id = s.id
-      LEFT JOIN public.user_organizations uo
-        ON uo.user_id::text = u.id::text
-        AND uo.is_approved = true
-        AND uo.organization_id = u.school_id
-      LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
-      WHERE u.id::text = ${decoded.userId}
-      LIMIT 1
-    `;
+    const users = await getUserById(decoded.userId);
     if (users.length === 0) return res.status(404).json({ error: "계정 없음" });
 
     const u = users[0];
-    const role = resolveRole(u);
+    const userInfo = buildUserResponse(u);
     const token = generateStockToken({
       userId: u.id,
-      role,
-      organizationId: u.organization_id || u.school_id,
+      role: userInfo.role,
+      organizationId: userInfo.orgId,
       username: u.username,
     });
 
-    res.json({
-      token,
-      user: {
-        id: u.id,
-        username: u.username,
-        fullName: u.full_name,
-        orgName: u.org_name,
-        orgId: u.organization_id || u.school_id,
-        role,
-      },
-    });
+    res.json({ token, user: userInfo });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -149,28 +132,10 @@ router.get("/auth/sso", async (req: Request, res: Response) => {
 // GET /auth/me
 router.get("/auth/me", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const users = await sql`
-      SELECT u.id, u.username, u.full_name, u.school_id,
-             s.name as org_name,
-             uo.role as org_role, uo.organization_id,
-             cr.role as coin_role
-      FROM public.users u
-      LEFT JOIN public.schools s ON u.school_id = s.id
-      LEFT JOIN public.user_organizations uo
-        ON uo.user_id::text = u.id::text
-        AND uo.is_approved = true
-        AND uo.organization_id = u.school_id
-      LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
-      WHERE u.id::text = ${user.userId}
-      LIMIT 1
-    `;
+    const { userId } = (req as any).user;
+    const users = await getUserById(userId);
     if (users.length === 0) return res.status(404).json({ error: "유저 없음" });
-    const u = users[0];
-    res.json({
-      ...u,
-      role: resolveRole(u),
-    });
+    res.json(buildUserResponse(users[0]));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
