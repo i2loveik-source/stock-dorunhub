@@ -12,14 +12,16 @@ async function getUserByUsername(username: string) {
            CONCAT(u.last_name, u.first_name) as full_name,
            s.name as org_name,
            uo.role as org_role, uo.organization_id,
-           cr.role as coin_role
+           (SELECT role FROM economy.coin_roles
+            WHERE user_id::text = u.id::text
+            ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END
+            LIMIT 1) as coin_role
     FROM public.users u
     LEFT JOIN public.schools s ON u.school_id = s.id
     LEFT JOIN public.user_organizations uo
       ON uo.user_id::text = u.id::text
       AND uo.is_approved = true
       AND uo.organization_id = u.school_id
-    LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
     WHERE u.username = ${username}
     LIMIT 1
   `;
@@ -32,14 +34,16 @@ async function getUserById(userId: string) {
            CONCAT(u.last_name, u.first_name) as full_name,
            s.name as org_name,
            uo.role as org_role, uo.organization_id,
-           cr.role as coin_role
+           (SELECT role FROM economy.coin_roles
+            WHERE user_id::text = u.id::text
+            ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END
+            LIMIT 1) as coin_role
     FROM public.users u
     LEFT JOIN public.schools s ON u.school_id = s.id
     LEFT JOIN public.user_organizations uo
       ON uo.user_id::text = u.id::text
       AND uo.is_approved = true
       AND uo.organization_id = u.school_id
-    LEFT JOIN economy.coin_roles cr ON cr.user_id::text = u.id::text
     WHERE u.id::text = ${userId}
     LIMIT 1
   `;

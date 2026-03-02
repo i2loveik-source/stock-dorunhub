@@ -82,8 +82,17 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
   try {
     const user = (req as any).user;
 
-    // platform_admin: 전체 조직 코인
-    if (user.role === "platform_admin") {
+    // DB에서 실제 coin_role 확인 (토큰 role이 잘못됐을 수 있으므로)
+    const roleCheck = await sql`
+      SELECT role FROM economy.coin_roles
+      WHERE user_id::text = ${user.userId}
+      ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END
+      LIMIT 1
+    `;
+    const actualRole = roleCheck[0]?.role || user.role;
+    const isPlatformAdmin = actualRole === "platform_admin" || user.role === "platform_admin";
+
+    if (isPlatformAdmin) {
       const coins = await sql`
         SELECT at.id, at.name, at.symbol, at.type, s.name as org_name, s.id as org_id
         FROM economy.asset_types at
