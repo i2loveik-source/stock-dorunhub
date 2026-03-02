@@ -76,6 +76,43 @@ router.get("/companies/pending", requireAuth, async (req: Request, res: Response
   }
 });
 
+// 내 조직 코인 목록 (로그인 사용자 기준 user_organizations 조회)
+// GET /companies/my-coins
+router.get("/companies/my-coins", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+
+    // platform_admin: 전체 조직 코인
+    if (user.role === "platform_admin") {
+      const coins = await sql`
+        SELECT at.id, at.name, at.symbol, at.type, s.name as org_name, s.id as org_id
+        FROM economy.asset_types at
+        LEFT JOIN public.schools s ON s.id = at.organization_id
+        WHERE at.is_active = true
+          AND at.type IN ('community', 'sub')
+        ORDER BY s.name, at.id
+      `;
+      return res.json(coins);
+    }
+
+    // 일반 사용자: user_organizations 기준 내 조직들의 코인
+    const coins = await sql`
+      SELECT DISTINCT at.id, at.name, at.symbol, at.type, s.name as org_name, s.id as org_id
+      FROM public.user_organizations uo
+      JOIN public.schools s ON s.id = uo.organization_id
+      JOIN economy.asset_types at ON at.organization_id = uo.organization_id
+      WHERE uo.user_id::text = ${user.userId}
+        AND uo.is_approved = true
+        AND at.is_active = true
+        AND at.type IN ('community', 'sub')
+      ORDER BY s.name, at.id
+    `;
+    res.json(coins);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 회사 상세
 // GET /companies/:id
 router.get("/companies/:id", requireAuth, async (req: Request, res: Response) => {

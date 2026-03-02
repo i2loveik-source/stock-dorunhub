@@ -19,11 +19,9 @@ export default function Admin() {
   });
 
   const load = async () => {
-    // orgId 없는 platform_admin은 "all"로 전체 코인 조회
-    const orgId = user?.orgId || "all";
     const [p, c] = await Promise.all([
       api("/api/companies/pending"),
-      api(`/api/internal/org-coins/${orgId}`).catch(() => []),
+      api("/api/companies/my-coins").catch(() => []),
     ]);
     if (Array.isArray(p)) setPending(p);
     if (Array.isArray(c)) setOrgCoins(c);
