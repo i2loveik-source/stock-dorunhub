@@ -102,6 +102,7 @@ function IpoApplyModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 export default function Market({ onSelect }: { onSelect: (id: number) => void }) {
   const [companies, setCompanies] = useState<any[]>([]);
+  const [myApps, setMyApps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showIpo, setShowIpo] = useState(false);
@@ -110,8 +111,12 @@ export default function Market({ onSelect }: { onSelect: (id: number) => void })
 
   const load = async () => {
     setLoading(true);
-    const data = await api(`/api/companies?orgId=${user?.orgId || ""}`);
+    const [data, apps] = await Promise.all([
+      api(`/api/companies`),
+      api(`/api/companies/my-applications`).catch(() => []),
+    ]);
     setCompanies(Array.isArray(data) ? data : []);
+    setMyApps(Array.isArray(apps) ? apps : []);
     setLoading(false);
   };
 
@@ -158,6 +163,40 @@ export default function Market({ onSelect }: { onSelect: (id: number) => void })
           className="w-full px-4 py-2.5 rounded-2xl border border-gray-200 text-sm bg-white outline-none focus:border-indigo-400"
         />
       </div>
+
+      {/* 내 IPO 신청 현황 */}
+      {myApps.length > 0 && (
+        <div className="px-4 mb-2">
+          <p className="text-xs font-bold text-gray-500 mb-1.5">📋 내 IPO 신청 현황</p>
+          <div className="space-y-1.5">
+            {myApps.map(a => {
+              const statusMap: Record<string, { label: string; color: string }> = {
+                pending:   { label: "심사 중", color: "bg-yellow-100 text-yellow-700" },
+                listed:    { label: "상장됨", color: "bg-green-100 text-green-700" },
+                rejected:  { label: "반려됨", color: "bg-red-100 text-red-600" },
+                suspended: { label: "거래정지", color: "bg-orange-100 text-orange-600" },
+                delisted:  { label: "상장폐지", color: "bg-gray-100 text-gray-500" },
+              };
+              const st = statusMap[a.status] || { label: a.status, color: "bg-gray-100 text-gray-500" };
+              return (
+                <div key={a.id}
+                  className={`flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-gray-100 ${a.status === "listed" ? "cursor-pointer hover:border-indigo-200" : ""}`}
+                  onClick={() => a.status === "listed" && onSelect(a.id)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{a.logo_emoji || "🏢"}</span>
+                    <div>
+                      <p className="text-sm font-bold text-gray-800">{a.name}</p>
+                      <p className="text-xs text-gray-400">{a.coin_symbol} · IPO {formatNum(a.ipo_price)}</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 요약 통계 */}
       <div className="px-4 mb-2">

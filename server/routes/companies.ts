@@ -12,7 +12,11 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const orgId = parseInt(req.query.orgId as string) || user.organizationId;
-    if (!orgId) return res.status(400).json({ error: "조직 ID 필요" });
+
+    // platform_admin 또는 orgId 없으면 전체 상장 목록
+    const orgFilter = orgId
+      ? sql`WHERE c.organization_id = ${orgId} AND c.status != 'pending'`
+      : sql`WHERE c.status != 'pending'`;
 
     const companies = await sql`
       SELECT
@@ -28,7 +32,7 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
           ELSE 0
         END as change_rate,
         u.username as ceo_username,
-        u.full_name as ceo_name,
+        CONCAT(u.last_name, u.first_name) as ceo_name,
         at.symbol as coin_symbol,
         at.name as coin_name,
         (SELECT COUNT(*) FROM investment.ownership WHERE company_id = c.id AND quantity > 0) as shareholder_count,
@@ -40,8 +44,7 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
       LEFT JOIN investment.market_price mp ON c.id = mp.company_id
       LEFT JOIN public.users u ON c.ceo_user_id = u.id
       LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
-      WHERE c.organization_id = ${orgId}
-        AND c.status != 'pending'
+      ${orgFilter}
       ORDER BY
         CASE c.status WHEN 'listed' THEN 0 WHEN 'suspended' THEN 1 ELSE 2 END,
         c.listed_at DESC NULLS LAST
@@ -71,6 +74,26 @@ router.get("/companies/pending", requireAuth, async (req: Request, res: Response
       ORDER BY c.created_at DESC
     `;
     res.json(companies);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 내 IPO 신청 현황
+// GET /companies/my-applications
+router.get("/companies/my-applications", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const rows = await sql`
+      SELECT c.id, c.name, c.logo_emoji, c.status, c.ipo_price, c.total_shares,
+             c.created_at, at.symbol as coin_symbol, s.name as org_name
+      FROM investment.companies c
+      LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
+      LEFT JOIN public.schools s ON s.id = c.organization_id
+      WHERE c.ceo_user_id::text = ${user.userId}
+      ORDER BY c.created_at DESC
+    `;
+    res.json(rows);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
