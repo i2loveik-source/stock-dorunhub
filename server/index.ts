@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { initSocket } from "./socket.js";
 import authRoutes from "./routes/auth.js";
@@ -49,7 +50,6 @@ app.use("/api", portfolioRoutes);
 // 프로덕션: 클라이언트 정적 파일
 // __dirname = dist/ (tsc 빌드 후), client/dist = ../client/dist
 const clientDist = path.join(__dirname, "../client/dist");
-const fs = require("fs");
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.get("/{*path}", (_req, res) => {
