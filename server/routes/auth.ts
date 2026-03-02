@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, verifySsoToken, generateStockToken } from "../auth.js";
 import { sql } from "../db.js";
-import bcrypt from "bcrypt";
+import { comparePasswords } from "../auth-utils.js";
 
 const router = Router();
 
@@ -73,17 +73,8 @@ router.post("/auth/login", async (req: Request, res: Response) => {
     if (users.length === 0) return res.status(401).json({ error: "아이디 또는 비밀번호가 틀렸습니다" });
     const u = users[0];
 
-    // 비밀번호 확인
-    let valid = false;
-    try {
-      if (u.password?.startsWith("$2")) {
-        valid = await bcrypt.compare(password, u.password);
-      } else {
-        valid = u.password === password;
-      }
-    } catch {
-      valid = u.password === password;
-    }
+    // 비밀번호 확인 (scrypt hex.salt 또는 bcrypt)
+    const valid = await comparePasswords(password, u.password || "");
     if (!valid) return res.status(401).json({ error: "아이디 또는 비밀번호가 틀렸습니다" });
 
     const userInfo = buildUserResponse(u);
