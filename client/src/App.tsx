@@ -8,6 +8,84 @@ import Admin from "./pages/Admin";
 
 type Page = "market" | "portfolio" | "news" | "admin";
 
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (!username || !password) return setError("아이디와 비밀번호를 입력해주세요");
+    setLoading(true);
+    setError("");
+    const data = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    setLoading(false);
+    if (data.token) {
+      setToken(data.token);
+      setUser(data.user);
+      onLogin();
+    } else {
+      setError(data.error || "로그인에 실패했습니다");
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 px-6">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <p className="text-6xl mb-3">📈</p>
+          <h1 className="text-3xl font-black text-gray-800">두런 스탁</h1>
+          <p className="text-gray-400 text-sm mt-1">학생 창업 투자 플랫폼</p>
+        </div>
+
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 space-y-3">
+          <p className="font-bold text-gray-700 text-sm mb-1">🔐 로그인</p>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-600">
+              {error}
+            </div>
+          )}
+
+          <input
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submit()}
+            placeholder="아이디"
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm outline-none focus:border-indigo-400"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submit()}
+            placeholder="비밀번호"
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm outline-none focus:border-indigo-400"
+          />
+          <button
+            onClick={submit}
+            disabled={loading}
+            className="w-full py-3 bg-indigo-500 text-white rounded-xl font-black text-sm disabled:opacity-50"
+          >
+            {loading ? "⏳ 로그인 중..." : "로그인"}
+          </button>
+
+          <div className="pt-2 border-t border-gray-50">
+            <p className="text-xs text-gray-400 text-center leading-relaxed">
+              두런 허브 또는 두런 코인 계정으로 로그인하세요.<br />
+              <a href="https://dorunhub.com" className="text-indigo-400 underline">dorunhub.com</a>에서 계정을 만들 수 있습니다.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(!!getToken());
   const [page, setPage] = useState<Page>("market");
@@ -27,13 +105,11 @@ export default function App() {
           setToken(data.token);
           setUser(data.user);
           setLoggedIn(true);
-          // URL 정리
           window.history.replaceState({}, "", window.location.pathname);
         }
         setLoading(false);
       });
     } else if (getToken()) {
-      // 기존 토큰 검증
       api("/api/auth/me").then(data => {
         if (data.error) {
           clearToken();
@@ -58,33 +134,10 @@ export default function App() {
     </div>
   );
 
-  if (!loggedIn) return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50">
-      <div className="text-center px-8">
-        <p className="text-7xl mb-4">📈</p>
-        <h1 className="text-3xl font-black text-gray-800 mb-2">두런 스탁</h1>
-        <p className="text-gray-500 mb-8">학생 창업 투자 플랫폼</p>
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-left space-y-3">
-          <p className="font-bold text-gray-700 text-sm">🔐 두런 허브 계정으로 로그인</p>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            두런 허브(dorunhub.com)에서 로그인 후<br />
-            상단 메뉴의 <strong>💹 두런 스탁</strong>을 클릭하면<br />
-            자동으로 연결됩니다.
-          </p>
-          <div className="bg-indigo-50 rounded-xl p-3">
-            <p className="text-xs text-indigo-600 font-mono break-all">
-              stock.dorunhub.com?sso_token=...
-            </p>
-          </div>
-        </div>
-        <p className="text-xs text-gray-300 mt-4">개발 환경에서는 두런 코인 토큰을 사용하세요</p>
-      </div>
-    </div>
-  );
+  if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
 
   return (
     <div className="min-h-screen bg-gray-50 max-w-lg mx-auto">
-      {/* 선택된 회사 상세 */}
       {selectedCompany ? (
         <Company companyId={selectedCompany} onBack={() => setSelectedCompany(null)} />
       ) : (
@@ -96,7 +149,6 @@ export default function App() {
         </>
       )}
 
-      {/* 하단 탭 바 */}
       {!selectedCompany && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-30 max-w-lg mx-auto">
           <div className="flex">
