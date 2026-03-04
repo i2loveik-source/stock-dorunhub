@@ -98,6 +98,7 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ssoToken = params.get("sso_token");
+    const next = params.get("next");
 
     if (ssoToken) {
       api(`/api/auth/sso?sso_token=${ssoToken}`).then(data => {
@@ -105,6 +106,7 @@ export default function App() {
           setToken(data.token);
           setUser(data.user);
           setLoggedIn(true);
+          if (next === "admin") setPage("admin");
           window.history.replaceState({}, "", window.location.pathname);
         }
         setLoading(false);

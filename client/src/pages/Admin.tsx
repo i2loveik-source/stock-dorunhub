@@ -73,6 +73,20 @@ export default function Admin() {
   const inp = "w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:border-indigo-400 bg-white";
   const btnPri = "w-full py-3 bg-indigo-500 text-white rounded-xl font-black text-sm hover:bg-indigo-600 disabled:opacity-40";
 
+  // 권한 체크: 관리자 이상만 접근
+  const allowedRoles = ["관리자", "org_issuer", "platform_admin", "admin", "super_admin"];
+  if (!user || !allowedRoles.includes(user.role)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center text-gray-400 p-8">
+          <p className="text-5xl mb-3">🔒</p>
+          <p className="text-lg font-black text-gray-700">접근 권한 없음</p>
+          <p className="text-sm mt-2 text-gray-400">관리자 계정으로 로그인 후 이용해주세요.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="pb-24">
       <div className="bg-white border-b px-4 py-3">

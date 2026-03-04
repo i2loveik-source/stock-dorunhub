@@ -31,17 +31,26 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 // SSO 토큰 검증 (coin_token → stock session)
 export function verifySsoToken(token: string): StockUser | null {
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    return {
-      userId: decoded.userId,
-      role: decoded.role,
-      organizationId: decoded.organizationId,
-      username: decoded.username,
-    };
-  } catch {
-    return null;
+  const secrets = [
+    process.env.HUB_SSO_SECRET,
+    "hub-sso-shared-secret",
+    JWT_SECRET,
+  ].filter(Boolean) as string[];
+
+  for (const secret of secrets) {
+    try {
+      const decoded = jwt.verify(token, secret) as any;
+      return {
+        userId: decoded.userId,
+        role: decoded.role,
+        organizationId: decoded.organizationId,
+        username: decoded.username,
+      };
+    } catch {
+      // try next secret
+    }
   }
+  return null;
 }
 
 // stock 전용 JWT 발급
