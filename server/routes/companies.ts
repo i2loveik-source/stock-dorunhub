@@ -175,16 +175,41 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
       return res.json(coins);
     }
 
-    // 일반 사용자: user_organizations 기준 내 조직들의 코인
+    // org_issuer: coin_roles 기반으로 조직 코인 조회 (user_organizations 없어도 됨)
+    if (actualRole === "org_issuer") {
+      // coin_roles에서 조직 매핑이 없으므로 users.school_id 기준으로 조회
+      const userRows = await sql`SELECT school_id FROM public.users WHERE id::text = ${user.userId} LIMIT 1`;
+      const schoolId = userRows[0]?.school_id || user.organizationId;
+      if (schoolId) {
+        const coins = await sql`
+          SELECT at.id, at.name, at.symbol, at.type, s.name as org_name, s.id as org_id
+          FROM economy.asset_types at
+          LEFT JOIN public.schools s ON s.id = at.organization_id
+          WHERE at.organization_id = ${schoolId}
+            AND at.is_active = true
+            AND at.type IN ('community', 'sub')
+          ORDER BY at.id
+        `;
+        return res.json(coins);
+      }
+    }
+
+    // 일반 사용자: user_organizations 기준 + school_id 기준 모두 포함
     const coins = await sql`
       SELECT DISTINCT at.id, at.name, at.symbol, at.type, s.name as org_name, s.id as org_id
-      FROM public.user_organizations uo
-      JOIN public.schools s ON s.id = uo.organization_id
-      JOIN economy.asset_types at ON at.organization_id = uo.organization_id
-      WHERE uo.user_id::text = ${user.userId}
-        AND uo.is_approved = true
-        AND at.is_active = true
+      FROM economy.asset_types at
+      LEFT JOIN public.schools s ON s.id = at.organization_id
+      WHERE at.is_active = true
         AND at.type IN ('community', 'sub')
+        AND (
+          at.organization_id IN (
+            SELECT organization_id FROM public.user_organizations
+            WHERE user_id::text = ${user.userId} AND is_approved = true
+          )
+          OR at.organization_id = (
+            SELECT school_id FROM public.users WHERE id::text = ${user.userId} LIMIT 1
+          )
+        )
       ORDER BY s.name, at.id
     `;
     res.json(coins);
