@@ -19,8 +19,9 @@ async function matchOrder(params: {
   quantity: number;
   orgId: number;
   assetTypeId: number;
+  feeRate?: number;
 }) {
-  const { userId, companyId, orderType, price, quantity, orgId, assetTypeId } = params;
+  const { userId, companyId, orderType, price, quantity, orgId, assetTypeId, feeRate = FEE_RATE } = params;
   const client = await pool.connect();
 
   try {
@@ -108,7 +109,7 @@ async function matchOrder(params: {
       const matchQty = Math.min(remaining, match.remaining_qty);
       const execPrice = parseFloat(match.price);
       const totalAmount = execPrice * matchQty;
-      const fee = Math.floor(totalAmount * FEE_RATE * 100) / 100;
+      const fee = Math.floor(totalAmount * feeRate * 100) / 100;
 
       const buyerId = orderType === "BUY" ? userId : match.user_id;
       const sellerId = orderType === "SELL" ? userId : match.user_id;
@@ -292,6 +293,29 @@ router.post("/orders", requireAuth, async (req: Request, res: Response) => {
     `;
     if (!companies[0]) return res.status(404).json({ error: "회사 없음" });
 
+    // 거래 설정 조회
+    const settingsRes = await pool.query(
+      "SELECT key, value FROM investment.settings WHERE organization_id = $1",
+      [companies[0].organization_id]
+    );
+    const cfg: Record<string, string> = {
+      fee_rate: "0.3",
+      trading_enabled: "true",
+      min_order_qty: "1",
+      max_order_qty: "1000",
+    };
+    for (const row of settingsRes.rows) cfg[row.key] = row.value;
+
+    if (cfg.trading_enabled === "false") {
+      return res.status(403).json({ error: "현재 거래가 중단된 상태입니다" });
+    }
+    const minQty = parseInt(cfg.min_order_qty);
+    const maxQty = parseInt(cfg.max_order_qty);
+    if (quantity < minQty || quantity > maxQty) {
+      return res.status(400).json({ error: `주문 수량은 ${minQty}~${maxQty}주 사이여야 합니다` });
+    }
+    const feeRate = parseFloat(cfg.fee_rate) / 100;
+
     const result = await matchOrder({
       userId: user.userId,
       companyId: parseInt(companyId),
@@ -300,6 +324,7 @@ router.post("/orders", requireAuth, async (req: Request, res: Response) => {
       quantity: parseInt(quantity),
       orgId: companies[0].organization_id,
       assetTypeId: companies[0].asset_type_id,
+      feeRate,
     });
 
     res.json(result);

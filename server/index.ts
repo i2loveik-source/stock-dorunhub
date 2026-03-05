@@ -13,6 +13,7 @@ import tradesRoutes from "./routes/trades.js";
 import newsRoutes from "./routes/news.js";
 import dividendRoutes from "./routes/dividend.js";
 import portfolioRoutes from "./routes/portfolio.js";
+import settingsRoutes from "./routes/settings.js";
 import { sql } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,16 @@ app.use((req, _res, next) => {
 
 // migrations
 await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS logo_url TEXT`.catch(() => {});
+await sql`
+  CREATE TABLE IF NOT EXISTS investment.settings (
+    id SERIAL PRIMARY KEY,
+    organization_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(organization_id, key)
+  )
+`.catch(() => {});
 
 // 헬스체크
 app.get("/health", (_req, res) => {
@@ -50,6 +61,7 @@ app.use("/api", tradesRoutes);
 app.use("/api", newsRoutes);
 app.use("/api", dividendRoutes);
 app.use("/api", portfolioRoutes);
+app.use("/api", settingsRoutes);
 
 // 프로덕션: 클라이언트 정적 파일
 // __dirname = dist/ (tsc 빌드 후), client/dist = ../client/dist

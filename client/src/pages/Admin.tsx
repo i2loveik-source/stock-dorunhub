@@ -8,6 +8,8 @@ export default function Admin() {
   const [pending, setPending] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const user = getUser();
 
@@ -34,10 +36,25 @@ export default function Admin() {
     if (Array.isArray(data)) setCompanies(data.filter((c: any) => c.status !== "pending"));
   };
 
+  const loadSettings = async () => {
+    const data = await api("/api/settings");
+    if (data && !data.error) setSettings(data);
+  };
+
+  const saveSettings = async () => {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify(settings) });
+    setSettingsSaved(true);
+    setTimeout(() => setSettingsSaved(false), 2000);
+  };
+
   useEffect(() => {
     loadPending();
     loadCompanies();
   }, []);
+
+  useEffect(() => {
+    if (tab === "settings") loadSettings();
+  }, [tab]);
 
   const showMsg = (m: string) => {
     setMsg(m);
@@ -237,29 +254,115 @@ export default function Admin() {
         </div>
       )}
 
-      {/* 거래 설정 탭 (더미) */}
+      {/* 거래 설정 탭 */}
       {tab === "settings" && (
-        <div className="px-4 mt-3 space-y-3">
+        <div className="space-y-4 px-4 pb-4">
+          {/* 거래 활성화 토글 */}
           <div className="bg-white rounded-2xl shadow-sm p-4">
-            <p className="font-black text-sm text-gray-700 mb-3">⚙️ 거래 수수료 설정</p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between py-2 border-b border-gray-50">
-                <span className="text-sm text-gray-600">거래 수수료율</span>
-                <span className="text-sm font-bold text-gray-800">0.3%</span>
+            <p className="font-black text-sm text-gray-700 mb-3">🔴 거래 활성화</p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">전체 거래 허용</span>
+              <button
+                onClick={() => setSettings(s => ({...s, trading_enabled: s.trading_enabled === "true" ? "false" : "true"}))}
+                className={`w-12 h-6 rounded-full transition-colors ${settings.trading_enabled === "true" ? "bg-emerald-500" : "bg-gray-300"}`}
+              >
+                <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${settings.trading_enabled === "true" ? "translate-x-6" : "translate-x-0"}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* 수수료 설정 */}
+          <div className="bg-white rounded-2xl shadow-sm p-4">
+            <p className="font-black text-sm text-gray-700 mb-3">💸 거래 수수료</p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">수수료율 (%)</span>
+              <input
+                type="number" step="0.1" min="0" max="10"
+                value={settings.fee_rate || "0.3"}
+                onChange={e => setSettings(s => ({...s, fee_rate: e.target.value}))}
+                className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+              />
+            </div>
+          </div>
+
+          {/* 서킷브레이커 */}
+          <div className="bg-white rounded-2xl shadow-sm p-4">
+            <p className="font-black text-sm text-gray-700 mb-3">⚡ 서킷브레이커</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">상한 (%)</span>
+                <input
+                  type="number" step="1" min="1" max="100"
+                  value={settings.circuit_up || "30"}
+                  onChange={e => setSettings(s => ({...s, circuit_up: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-gray-50">
-                <span className="text-sm text-gray-600">서킷브레이커 상한</span>
-                <span className="text-sm font-bold text-gray-800">+30%</span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-600">서킷브레이커 하한</span>
-                <span className="text-sm font-bold text-gray-800">-30%</span>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">하한 (%)</span>
+                <input
+                  type="number" step="1" min="1" max="100"
+                  value={settings.circuit_down || "30"}
+                  onChange={e => setSettings(s => ({...s, circuit_down: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-xl p-2">
-              💡 거래 설정 변경 기능은 추후 업데이트 예정입니다.
-            </p>
           </div>
+
+          {/* 일일 가격 제한 */}
+          <div className="bg-white rounded-2xl shadow-sm p-4">
+            <p className="font-black text-sm text-gray-700 mb-3">📊 일일 가격 제한</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">상한가 (%)</span>
+                <input type="number" step="1" min="1" max="100"
+                  value={settings.daily_price_limit_up || "30"}
+                  onChange={e => setSettings(s => ({...s, daily_price_limit_up: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">하한가 (%)</span>
+                <input type="number" step="1" min="1" max="100"
+                  value={settings.daily_price_limit_down || "30"}
+                  onChange={e => setSettings(s => ({...s, daily_price_limit_down: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 주문 수량 제한 */}
+          <div className="bg-white rounded-2xl shadow-sm p-4">
+            <p className="font-black text-sm text-gray-700 mb-3">🔢 주문 수량 제한</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">최소 주문 수량</span>
+                <input type="number" step="1" min="1"
+                  value={settings.min_order_qty || "1"}
+                  onChange={e => setSettings(s => ({...s, min_order_qty: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">최대 주문 수량</span>
+                <input type="number" step="1" min="1"
+                  value={settings.max_order_qty || "1000"}
+                  onChange={e => setSettings(s => ({...s, max_order_qty: e.target.value}))}
+                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 저장 버튼 */}
+          <button
+            onClick={saveSettings}
+            className="w-full py-3 bg-blue-600 text-white rounded-2xl font-black text-sm"
+          >
+            {settingsSaved ? "✅ 저장됨" : "💾 설정 저장"}
+          </button>
         </div>
       )}
 
