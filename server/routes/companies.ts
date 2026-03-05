@@ -66,7 +66,7 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
          WHERE o2.company_id = c.id) as market_cap
       FROM investment.companies c
       LEFT JOIN investment.market_price mp ON c.id = mp.company_id
-      LEFT JOIN public.users u ON c.ceo_user_id = u.id
+      LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
       LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
       ${orgFilter}
       ORDER BY
@@ -104,7 +104,7 @@ router.get("/companies/pending", requireAuth, async (req: Request, res: Response
                  CONCAT(u.last_name, u.first_name) as ceo_name,
                  at.symbol as coin_symbol, s.name as org_name
           FROM investment.companies c
-          LEFT JOIN public.users u ON c.ceo_user_id = u.id
+          LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
           LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
           LEFT JOIN public.schools s ON s.id = c.organization_id
           WHERE c.status = 'pending'
@@ -115,7 +115,7 @@ router.get("/companies/pending", requireAuth, async (req: Request, res: Response
                  CONCAT(u.last_name, u.first_name) as ceo_name,
                  at.symbol as coin_symbol, s.name as org_name
           FROM investment.companies c
-          LEFT JOIN public.users u ON c.ceo_user_id = u.id
+          LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
           LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
           LEFT JOIN public.schools s ON s.id = c.organization_id
           WHERE c.organization_id = ${user.organizationId} AND c.status = 'pending'
@@ -208,7 +208,7 @@ router.get("/companies/:id", requireAuth, async (req: Request, res: Response) =>
              s.name as org_name
       FROM investment.companies c
       LEFT JOIN investment.market_price mp ON c.id = mp.company_id
-      LEFT JOIN public.users u ON c.ceo_user_id = u.id
+      LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
       LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
       LEFT JOIN public.schools s ON c.organization_id = s.id
       WHERE c.id = ${id}
