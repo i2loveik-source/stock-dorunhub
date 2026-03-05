@@ -1,22 +1,49 @@
-import { useEffect, useState } from "react";
-import { api, formatNum, changeBg, changeArrow, getUser } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, formatNum, getUser, getToken } from "../api";
+
+function CompanyLogo({ company }: { company: any }) {
+  if (company.logo_url) {
+    return <img src={company.logo_url} className="w-10 h-10 rounded-xl object-cover" alt={company.name} />;
+  }
+  return (
+    <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-2xl">
+      {company.logo_emoji || "🏢"}
+    </div>
+  );
+}
 
 function IpoApplyModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [coins, setCoins] = useState<any[]>([]);
   const [form, setForm] = useState({
     name: "", description: "", businessPlan: "",
-    totalShares: "1000", ipoPrice: "", assetTypeId: "", logoEmoji: "🏢",
+    totalShares: "1000", ipoPrice: "", assetTypeId: "", logoEmoji: "🏢", logoUrl: "",
   });
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api("/api/companies/my-coins").then(d => {
-      console.log("[IPO] coins:", d);
       const list = Array.isArray(d) ? d : (d.coins || []);
       setCoins(list);
     });
   }, []);
+
+  const handleLogoUpload = async (file: File) => {
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+    const fd = new FormData();
+    fd.append("logo", file);
+    const res = await fetch("/api/companies/upload-logo", {
+      headers: { Authorization: `Bearer ${getToken()}` },
+      method: "POST",
+      body: fd,
+    });
+    const d = await res.json();
+    if (d.url) setForm(p => ({ ...p, logoUrl: d.url }));
+  };
 
   const submit = async () => {
     if (!form.name || !form.ipoPrice || !form.assetTypeId) {
@@ -29,50 +56,82 @@ function IpoApplyModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
     else { onDone(); }
   };
 
-  const inp = "w-full px-3 py-2.5 rounded-xl border border-[#2d3450] text-sm outline-none focus:border-[#4169E1] bg-[#1e2436] text-white placeholder-gray-500";
+  const inp = "w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:border-blue-400 bg-white text-gray-800 placeholder-gray-400";
 
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-end" onClick={onClose}>
-      <div className="bg-[#141824] w-full max-w-lg mx-auto rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto"
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg mx-auto rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-black text-lg text-white">🏢 IPO 신청</h3>
+          <h3 className="font-black text-lg text-gray-900">🏢 IPO 신청</h3>
           <button onClick={onClose} className="text-gray-400 text-xl">✕</button>
         </div>
-        <div className="bg-[#1e2436] border border-[#2d3450] rounded-xl p-3 text-xs text-blue-400 mb-4">
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-600 mb-4">
           💡 IPO 신청 후 관리자 승인이 나면 주식 시장에 상장됩니다.
         </div>
         {msg && (
           <div className={`mb-3 p-3 rounded-xl text-sm font-medium
-            ${msg.startsWith("❌") ? "bg-red-900/40 text-red-400 border border-red-800" : "bg-green-900/40 text-green-400"}`}>
+            ${msg.startsWith("❌") ? "bg-red-50 text-red-500 border border-red-200" : "bg-green-50 text-green-600"}`}>
             {msg}
           </div>
         )}
         <div className="space-y-2.5">
-          <div className="flex gap-2">
-            <input className="w-12 px-2 py-2.5 rounded-xl border border-[#2d3450] bg-[#1e2436] text-center text-xl outline-none text-white"
-              value={form.logoEmoji} onChange={e => setForm(p => ({ ...p, logoEmoji: e.target.value }))} />
-            <input className={inp + " flex-1"} placeholder="회사명 *"
-              value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+          {/* 로고 섹션 */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block font-medium">로고</label>
+            <div className="flex items-center gap-3">
+              <input
+                className="w-14 px-2 py-2.5 rounded-xl border border-gray-200 bg-white text-center text-xl outline-none focus:border-blue-400 text-gray-800"
+                value={form.logoEmoji}
+                onChange={e => setForm(p => ({ ...p, logoEmoji: e.target.value }))}
+                placeholder="🏢"
+              />
+              <span className="text-xs text-gray-400">또는</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 bg-white hover:bg-gray-50 font-medium"
+                >
+                  📁 이미지 업로드
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) handleLogoUpload(file);
+                  }}
+                />
+                {logoPreview && (
+                  <img src={logoPreview} className="w-12 h-12 rounded-xl object-cover border border-gray-200" alt="preview" />
+                )}
+              </div>
+            </div>
           </div>
+
+          <input className={inp} placeholder="회사명 *"
+            value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           <textarea className={inp + " resize-none"} rows={2} placeholder="사업 소개 (선택)"
             value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
           <textarea className={inp + " resize-none"} rows={2} placeholder="사업 계획서 (선택)"
             value={form.businessPlan} onChange={e => setForm(p => ({ ...p, businessPlan: e.target.value }))} />
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">총 주식 수 *</label>
+              <label className="text-xs text-gray-500 mb-1 block">총 주식 수 *</label>
               <input type="number" className={inp} placeholder="1000"
                 value={form.totalShares} onChange={e => setForm(p => ({ ...p, totalShares: e.target.value }))} />
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">IPO 가격 *</label>
+              <label className="text-xs text-gray-500 mb-1 block">IPO 가격 *</label>
               <input type="number" className={inp} placeholder="100"
                 value={form.ipoPrice} onChange={e => setForm(p => ({ ...p, ipoPrice: e.target.value }))} />
             </div>
           </div>
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">거래 코인 *</label>
+            <label className="text-xs text-gray-500 mb-1 block">거래 코인 *</label>
             <select className={inp} value={form.assetTypeId}
               onChange={e => setForm(p => ({ ...p, assetTypeId: e.target.value }))}>
               <option value="">코인 선택...</option>
@@ -83,12 +142,12 @@ function IpoApplyModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
               ))}
             </select>
             {coins.length === 0 && (
-              <p className="text-xs text-yellow-500 mt-1">⚠️ 소속 조직에 등록된 코인이 없습니다. 관리자에게 문의하세요.</p>
+              <p className="text-xs text-yellow-600 mt-1">⚠️ 소속 조직에 등록된 코인이 없습니다. 관리자에게 문의하세요.</p>
             )}
           </div>
         </div>
         <button onClick={submit} disabled={loading}
-          className="w-full mt-4 py-3 bg-[#4169E1] text-white rounded-xl font-black text-sm disabled:opacity-50">
+          className="w-full mt-4 py-3 bg-blue-500 text-white rounded-xl font-black text-sm disabled:opacity-50 hover:bg-blue-600 transition">
           {loading ? "⏳ 신청 중..." : "📋 IPO 신청하기"}
         </button>
       </div>
@@ -124,43 +183,42 @@ export default function Market({ onSelect, onLogout }: { onSelect: (id: number) 
   }, []);
 
   const filtered = companies.filter(c =>
-    c.name.includes(search) || c.ceo_name?.includes(search)
+    c.name.includes(search) || c.ceo_name?.includes(search) || c.ceo_username?.includes(search)
   );
 
   return (
-    <div className="pb-24 bg-[#0a0e1a] min-h-screen">
+    <div className="pb-24 bg-[#F4F6FA] min-h-screen">
       {/* 헤더 */}
-      <div className="bg-[#0a0e1a] border-b border-[#1e2436] px-4 py-3 sticky top-0 z-10">
+      <div className="bg-white border-b border-gray-200 shadow-sm px-4 py-3 sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl">📈</span>
             <div>
-              <h1 className="font-black text-lg text-white leading-tight">두런허브스탁</h1>
-              <p className="text-[10px] text-gray-500 leading-tight">주식 시장</p>
+              <h1 className="font-black text-lg text-gray-900 leading-tight">두런허브스탁</h1>
+              <p className="text-[10px] text-gray-400 leading-tight">주식 시장</p>
             </div>
           </div>
           {/* 유저 아바타 */}
           <div className="relative">
             <button onClick={() => setShowProfile(v => !v)}
-              className="w-9 h-9 rounded-full bg-[#4169E1] flex items-center justify-center text-base font-black text-white shadow-lg">
+              className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center text-base font-black text-white shadow">
               {user?.username?.[0]?.toUpperCase() || "?"}
             </button>
-            {/* 드롭다운 */}
             {showProfile && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowProfile(false)} />
-                <div className="absolute top-full right-0 mt-2 bg-[#141824] border border-[#2d3450] rounded-2xl shadow-2xl p-3 z-50 min-w-52">
-                  <div className="pb-2 mb-2 border-b border-[#2d3450]">
-                    <p className="text-sm font-black text-white">{user?.fullName || user?.username}</p>
+                <div className="absolute top-full right-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-xl p-3 z-50 min-w-52">
+                  <div className="pb-2 mb-2 border-b border-gray-100">
+                    <p className="text-sm font-black text-gray-900">{user?.fullName || user?.username}</p>
                     <p className="text-xs text-gray-400">@{user?.username}</p>
-                    {user?.orgName && <p className="text-xs text-blue-400 mt-0.5">🏫 {user.orgName}</p>}
+                    {user?.orgName && <p className="text-xs text-blue-500 mt-0.5">🏫 {user.orgName}</p>}
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); setShowIpo(true); setShowProfile(false); }}
-                    className="w-full text-left text-sm py-2 px-2 rounded-xl hover:bg-[#1e2436] text-gray-200 transition">
+                    className="w-full text-left text-sm py-2 px-2 rounded-xl hover:bg-gray-50 text-gray-700 transition">
                     🏢 IPO 신청
                   </button>
                   <button onClick={(e) => { e.stopPropagation(); setShowProfile(false); onLogout(); }}
-                    className="w-full text-left text-sm py-2 px-2 rounded-xl hover:bg-red-900/30 text-red-400 mt-0.5 transition">
+                    className="w-full text-left text-sm py-2 px-2 rounded-xl hover:bg-red-50 text-red-500 mt-0.5 transition">
                     🚪 로그아웃
                   </button>
                 </div>
@@ -172,50 +230,50 @@ export default function Market({ onSelect, onLogout }: { onSelect: (id: number) 
 
       {/* IPO 성공 메시지 */}
       {ipoSuccess && (
-        <div className="mx-4 mt-3 p-3 rounded-xl bg-green-900/30 border border-green-700 text-sm text-green-400 font-medium flex justify-between">
+        <div className="mx-4 mt-3 p-3 rounded-xl bg-green-50 border border-green-200 text-sm text-green-600 font-medium flex justify-between">
           <span>✅ IPO 신청 완료! 관리자 승인 후 상장됩니다.</span>
-          <button onClick={() => setIpoSuccess(false)} className="text-green-600">✕</button>
+          <button onClick={() => setIpoSuccess(false)} className="text-green-400">✕</button>
         </div>
       )}
 
       {/* 검색바 */}
       <div className="px-4 pt-3 pb-2">
         <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="회사명 또는 CEO 검색"
-            className="w-full pl-9 pr-4 py-2.5 rounded-2xl text-sm bg-[#1e2436] text-white placeholder-gray-500 outline-none focus:ring-1 focus:ring-[#4169E1]"
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm bg-white border border-gray-200 text-gray-800 placeholder-gray-400 outline-none focus:border-blue-300"
           />
         </div>
       </div>
 
       {/* 시장 통계 pill 행 */}
-      <div className="px-4 pb-3 flex gap-2">
-        <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#141824] text-green-400">
+      <div className="px-4 pb-3 flex gap-2 flex-wrap">
+        <span className="text-xs font-bold px-3 py-1 rounded-full bg-white border border-gray-200 text-green-600">
           📊 상장 {companies.filter(c => c.status === "listed").length}
         </span>
-        <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#141824] text-yellow-400">
-          ⚠️ 정지 {companies.filter(c => c.status === "suspended").length}
+        <span className="text-xs font-bold px-3 py-1 rounded-full bg-white border border-gray-200 text-orange-500">
+          ⚠️ 거래정지 {companies.filter(c => c.status === "suspended").length}
         </span>
-        <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#141824] text-gray-400">
-          전체 {companies.length}종목
+        <span className="text-xs font-bold px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-500">
+          전체 {companies.length}
         </span>
       </div>
 
       {/* 종목 카드 목록 */}
       <div className="px-4 space-y-2">
         {loading ? (
-          <div className="text-center py-12 text-gray-500">
+          <div className="text-center py-12 text-gray-400">
             <p className="text-4xl mb-2">⏳</p>
             <p className="text-sm">불러오는 중...</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-gray-500">
+          <div className="text-center py-16 text-gray-400">
             <p className="text-5xl mb-3">🏢</p>
-            <p className="text-sm font-bold text-gray-400">아직 상장된 회사가 없습니다</p>
-            <p className="text-xs mt-1">우측 상단 아바타 → IPO 신청으로 등록해보세요!</p>
+            <p className="text-sm font-bold text-gray-500">아직 상장된 회사가 없습니다</p>
+            <p className="text-xs mt-1 text-gray-400">우측 상단 아바타 → IPO 신청으로 등록해보세요!</p>
           </div>
         ) : filtered.map(c => {
           const rate = parseFloat(c.change_rate || 0);
@@ -225,42 +283,42 @@ export default function Market({ onSelect, onLogout }: { onSelect: (id: number) 
             <button
               key={c.id}
               onClick={() => onSelect(c.id)}
-              className={`w-full bg-[#141824] rounded-2xl p-4 text-left transition active:scale-95
-                ${isSuspended ? "opacity-60" : "hover:bg-[#1a2030]"}`}
+              className={`w-full bg-white rounded-2xl shadow-sm p-4 text-left transition active:scale-95
+                ${isSuspended ? "opacity-60" : "hover:shadow-md"}`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="text-3xl">{c.logo_emoji || "🏢"}</span>
+                  <CompanyLogo company={c} />
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-black text-base text-white">{c.name}</p>
+                      <p className="font-bold text-base text-gray-900">{c.name}</p>
                       {isSuspended && (
-                        <span className="text-[10px] bg-yellow-900/40 text-yellow-400 px-1.5 py-0.5 rounded-full font-bold">
+                        <span className="text-[10px] bg-orange-100 text-orange-500 px-1.5 py-0.5 rounded-full font-bold">
                           거래정지
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 lowercase">
+                    <p className="text-xs text-gray-400 lowercase">
                       {c.coin_symbol} · {c.ceo_name || c.ceo_username}
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="font-black text-base text-white">
+                  <p className="font-black text-base text-gray-900">
                     {formatNum(c.current_price || c.ipo_price)}
-                    <span className="text-xs font-normal text-gray-500 ml-1">{c.coin_symbol}</span>
+                    <span className="text-xs font-normal text-gray-400 ml-1">{c.coin_symbol}</span>
                   </p>
-                  <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full mt-0.5 ${isUp ? "bg-[#FF4B4B]/20 text-[#FF4B4B]" : "bg-[#4B9EFF]/20 text-[#4B9EFF]"}`}>
+                  <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full mt-0.5 ${isUp ? "bg-red-50 text-red-500" : "bg-blue-50 text-blue-500"}`}>
                     {rate >= 0 ? "▲" : "▼"} {Math.abs(rate).toFixed(2)}%
                   </span>
                 </div>
               </div>
-              <div className="flex gap-3 mt-2.5 pt-2 border-t border-[#1e2436] text-xs text-gray-500">
-                <span>시총 <span className="font-black text-gray-300">{formatNum(c.market_cap || 0)}</span></span>
+              <div className="flex gap-3 mt-2.5 pt-2 border-t border-gray-100 text-xs text-gray-400">
+                <span>시총 <span className="font-black text-gray-600">{formatNum(c.market_cap || 0)}</span></span>
                 <span>·</span>
-                <span>주주 <span className="font-black text-gray-300">{c.shareholder_count || 0}</span>명</span>
+                <span>주주 <span className="font-black text-gray-600">{c.shareholder_count || 0}</span>명</span>
                 <span>·</span>
-                <span>IPO <span className="font-black text-gray-300">{formatNum(c.ipo_price)}</span></span>
+                <span>IPO <span className="font-black text-gray-600">{formatNum(c.ipo_price)}</span></span>
               </div>
             </button>
           );
@@ -270,27 +328,27 @@ export default function Market({ onSelect, onLogout }: { onSelect: (id: number) 
       {/* 내 IPO 신청 현황 */}
       {myApps.length > 0 && (
         <div className="px-4 mt-4">
-          <p className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">📋 내 IPO 신청 현황</p>
+          <p className="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">📋 내 IPO 신청 현황</p>
           <div className="space-y-2">
             {myApps.map(a => {
               const statusMap: Record<string, { label: string; color: string }> = {
-                pending:   { label: "심사 중", color: "bg-yellow-900/40 text-yellow-400" },
-                listed:    { label: "상장됨", color: "bg-green-900/40 text-green-400" },
-                rejected:  { label: "반려됨", color: "bg-red-900/40 text-red-400" },
-                suspended: { label: "거래정지", color: "bg-orange-900/40 text-orange-400" },
-                delisted:  { label: "상장폐지", color: "bg-gray-800 text-gray-500" },
+                pending:   { label: "심사 중", color: "bg-yellow-100 text-yellow-600" },
+                listed:    { label: "상장됨", color: "bg-green-100 text-green-600" },
+                rejected:  { label: "반려됨", color: "bg-red-100 text-red-500" },
+                suspended: { label: "거래정지", color: "bg-orange-100 text-orange-500" },
+                delisted:  { label: "상장폐지", color: "bg-gray-100 text-gray-400" },
               };
-              const st = statusMap[a.status] || { label: a.status, color: "bg-gray-800 text-gray-500" };
+              const st = statusMap[a.status] || { label: a.status, color: "bg-gray-100 text-gray-400" };
               return (
                 <div key={a.id}
-                  className={`flex items-center justify-between bg-[#141824] rounded-2xl px-4 py-3 ${a.status === "listed" ? "cursor-pointer hover:bg-[#1a2030]" : ""}`}
+                  className={`flex items-center justify-between bg-white rounded-2xl shadow-sm px-4 py-3 ${a.status === "listed" ? "cursor-pointer hover:shadow-md" : ""}`}
                   onClick={() => a.status === "listed" && onSelect(a.id)}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{a.logo_emoji || "🏢"}</span>
+                    <CompanyLogo company={a} />
                     <div>
-                      <p className="text-sm font-black text-white">{a.name}</p>
-                      <p className="text-xs text-gray-500">{a.coin_symbol} · IPO {formatNum(a.ipo_price)}</p>
+                      <p className="text-sm font-bold text-gray-900">{a.name}</p>
+                      <p className="text-xs text-gray-400">{a.coin_symbol} · IPO {formatNum(a.ipo_price)}</p>
                     </div>
                   </div>
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${st.color}`}>{st.label}</span>

@@ -3,8 +3,32 @@ import { requireAuth } from "../auth.js";
 import { sql } from "../db.js";
 import { createCompanyWallet } from "../coinApi.js";
 import { getIo } from "../socket.js";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = Router();
+
+// 로고 이미지 업로드
+// POST /companies/upload-logo
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+router.post("/companies/upload-logo", requireAuth, upload.single("logo"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "파일 없음" });
+    // client/dist/uploads/logos/ 에 저장 (빌드 후 경로)
+    const uploadsDir = path.join(__dirname, "../../client/dist/uploads/logos");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const ext = req.file.originalname.split(".").pop() || "jpg";
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    fs.writeFileSync(path.join(uploadsDir, filename), req.file.buffer);
+    res.json({ url: `/uploads/logos/${filename}` });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // 조직 내 상장 회사 목록
 // GET /companies?orgId=
@@ -179,7 +203,7 @@ router.get("/companies/:id", requireAuth, async (req: Request, res: Response) =>
              CASE WHEN mp.prev_price > 0
                THEN ROUND(((mp.current_price - mp.prev_price) / mp.prev_price * 100)::numeric, 2)
                ELSE 0 END as change_rate,
-             u.username as ceo_username, u.full_name as ceo_name,
+             u.username as ceo_username, CONCAT(u.last_name, u.first_name) as ceo_name,
              at.symbol as coin_symbol, at.name as coin_name,
              s.name as org_name
       FROM investment.companies c
@@ -201,7 +225,7 @@ router.get("/companies/:id", requireAuth, async (req: Request, res: Response) =>
 router.post("/companies", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { name, description, businessPlan, totalShares, ipoPrice, assetTypeId, logoEmoji } = req.body;
+    const { name, description, businessPlan, totalShares, ipoPrice, assetTypeId, logoEmoji, logoUrl } = req.body;
 
     if (!name || !ipoPrice || !assetTypeId) {
       return res.status(400).json({ error: "회사명, IPO 가격, 코인 종류는 필수입니다" });
@@ -212,11 +236,11 @@ router.post("/companies", requireAuth, async (req: Request, res: Response) => {
     const company = await sql`
       INSERT INTO investment.companies
         (name, ceo_user_id, organization_id, asset_type_id, description, business_plan,
-         total_shares, available_shares, ipo_price, logo_emoji)
+         total_shares, available_shares, ipo_price, logo_emoji, logo_url)
       VALUES
         (${name}, ${user.userId}::uuid, ${user.organizationId}, ${assetTypeId},
          ${description || ""}, ${businessPlan || ""},
-         ${shares}, ${shares}, ${ipoPrice}, ${logoEmoji || "🏢"})
+         ${shares}, ${shares}, ${ipoPrice}, ${logoEmoji || "🏢"}, ${logoUrl || null})
       RETURNING *
     `;
     res.json({ success: true, company: company[0] });

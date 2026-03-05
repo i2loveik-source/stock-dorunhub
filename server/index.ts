@@ -13,6 +13,7 @@ import tradesRoutes from "./routes/trades.js";
 import newsRoutes from "./routes/news.js";
 import dividendRoutes from "./routes/dividend.js";
 import portfolioRoutes from "./routes/portfolio.js";
+import { sql } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -33,6 +34,9 @@ app.use((req, _res, next) => {
   next();
 });
 
+// migrations
+await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS logo_url TEXT`.catch(() => {});
+
 // 헬스체크
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "dorun-stock", timestamp: new Date().toISOString() });
@@ -51,6 +55,7 @@ app.use("/api", portfolioRoutes);
 // __dirname = dist/ (tsc 빌드 후), client/dist = ../client/dist
 const clientDist = path.join(__dirname, "../client/dist");
 if (fs.existsSync(clientDist)) {
+  app.use("/uploads", express.static(path.join(clientDist, "uploads")));
   app.use(express.static(clientDist));
   app.get("/{*path}", (_req, res) => {
     res.sendFile(path.join(clientDist, "index.html"));
