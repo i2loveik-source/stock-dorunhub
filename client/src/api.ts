@@ -1,4 +1,4 @@
-/** 두런 스탁 API 유틸 */
+/** 두런허브스탁 API 유틸 */
 const API_BASE = (window as any).__STOCK_API_BASE || "";
 
 export function getToken(): string | null {

@@ -37,7 +37,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <p className="text-6xl mb-3">📈</p>
-          <h1 className="text-3xl font-black text-gray-800">두런 스탁</h1>
+          <h1 className="text-3xl font-black text-gray-800">두런허브스탁</h1>
           <p className="text-gray-400 text-sm mt-1">학생 창업 투자 플랫폼</p>
         </div>
 
@@ -130,7 +130,7 @@ export default function App() {
     <div className="flex items-center justify-center min-h-screen bg-gray-50">
       <div className="text-center text-gray-400">
         <p className="text-5xl mb-3">📈</p>
-        <p className="text-lg font-bold text-gray-600">두런 스탁</p>
+        <p className="text-lg font-bold text-gray-600">두런허브스탁</p>
         <p className="text-sm mt-1">불러오는 중...</p>
       </div>
     </div>

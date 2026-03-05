@@ -58,12 +58,12 @@ if (fs.existsSync(clientDist)) {
 } else {
   console.warn("⚠️ client/dist 없음 — 프론트 빌드 필요");
   app.get("/{*path}", (_req, res) => {
-    res.send("<h1>두런 스탁 서버 실행 중</h1><p>프론트 빌드 대기 중...</p>");
+    res.send("<h1>두런허브스탁 서버 실행 중</h1><p>프론트 빌드 대기 중...</p>");
   });
 }
 
 server.listen(PORT, () => {
-  console.log(`📈 두런 스탁 서버 실행 중: http://localhost:${PORT}`);
+  console.log(`📈 두런허브스탁 서버 실행 중: http://localhost:${PORT}`);
 });
 
 export default app;
