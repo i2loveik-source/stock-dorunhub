@@ -8,20 +8,20 @@ const router = Router();
 // 공통 유저 조회 쿼리 (username 기준)
 async function getUserByUsername(username: string) {
   return sql`
-    SELECT u.id, u.username, u.password, u.school_id,
+    SELECT u.id, u.username, u.password, u.organization_id,
            CONCAT(u.last_name, u.first_name) as full_name,
-           s.name as org_name,
-           uo.role as org_role, uo.organization_id,
+           o.name as org_name,
+           uo.role as org_role, uo.organization_id as uo_organization_id,
            (SELECT role FROM economy.coin_roles
             WHERE user_id::text = u.id::text
             ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END
             LIMIT 1) as coin_role
     FROM public.users u
-    LEFT JOIN public.schools s ON u.school_id = s.id
+    LEFT JOIN public.organizations o ON u.organization_id = o.id
     LEFT JOIN public.user_organizations uo
       ON uo.user_id::text = u.id::text
       AND uo.is_approved = true
-      AND uo.organization_id = u.school_id
+      AND uo.organization_id = u.organization_id
     WHERE u.username = ${username}
     LIMIT 1
   `;
@@ -30,20 +30,20 @@ async function getUserByUsername(username: string) {
 // 공통 유저 조회 쿼리 (id 기준)
 async function getUserById(userId: string) {
   return sql`
-    SELECT u.id, u.username, u.school_id,
+    SELECT u.id, u.username, u.organization_id,
            CONCAT(u.last_name, u.first_name) as full_name,
-           s.name as org_name,
-           uo.role as org_role, uo.organization_id,
+           o.name as org_name,
+           uo.role as org_role, uo.organization_id as uo_organization_id,
            (SELECT role FROM economy.coin_roles
             WHERE user_id::text = u.id::text
             ORDER BY CASE role WHEN 'platform_admin' THEN 0 ELSE 1 END
             LIMIT 1) as coin_role
     FROM public.users u
-    LEFT JOIN public.schools s ON u.school_id = s.id
+    LEFT JOIN public.organizations o ON u.organization_id = o.id
     LEFT JOIN public.user_organizations uo
       ON uo.user_id::text = u.id::text
       AND uo.is_approved = true
-      AND uo.organization_id = u.school_id
+      AND uo.organization_id = u.organization_id
     WHERE u.id::text = ${userId}
     LIMIT 1
   `;
@@ -62,7 +62,7 @@ function buildUserResponse(u: any) {
     username: u.username,
     fullName: u.full_name,
     orgName: u.org_name,
-    orgId: u.organization_id || u.school_id,
+    orgId: u.uo_organization_id || u.organization_id,
     role: resolveRole(u),
   };
 }
