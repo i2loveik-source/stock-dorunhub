@@ -185,6 +185,8 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
         LEFT JOIN public.organizations s ON s.id = at.organization_id
         WHERE at.is_active = true
           AND at.type IN ('community', 'sub')
+          AND at.symbol NOT LIKE '%\_V' ESCAPE '\\'
+          AND at.symbol NOT LIKE '%\_C' ESCAPE '\\'
         ORDER BY s.name, at.id
       `;
       return res.json(coins);
@@ -203,6 +205,8 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
           WHERE at.organization_id = ${schoolId}
             AND at.is_active = true
             AND at.type IN ('community', 'sub')
+            AND at.symbol NOT LIKE '%\_V' ESCAPE '\\'
+            AND at.symbol NOT LIKE '%\_C' ESCAPE '\\'
           ORDER BY at.id
         `;
         return res.json(coins);
@@ -216,6 +220,8 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
       LEFT JOIN public.organizations s ON s.id = at.organization_id
       WHERE at.is_active = true
         AND at.type IN ('community', 'sub')
+        AND at.symbol NOT LIKE '%\_V' ESCAPE '\\'
+        AND at.symbol NOT LIKE '%\_C' ESCAPE '\\'
         AND (
           at.organization_id IN (
             SELECT organization_id FROM public.user_organizations
