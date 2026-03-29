@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, formatNum, getUser } from "../api";
 
-type AdminTab = "ipo" | "market" | "settings" | "notice";
+type AdminTab = "ipo" | "market" | "settings" | "financial" | "notice";
 
 export default function Admin() {
   const [tab, setTab] = useState<AdminTab>("ipo");
@@ -11,6 +11,11 @@ export default function Admin() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [loading, setLoading] = useState(false);
+  // 실적 입력 상태
+  const [finCompanyId, setFinCompanyId] = useState("");
+  const [finForm, setFinForm] = useState({ period: "", revenue: "", operatingProfit: "", netIncome: "", eps: "", notes: "" });
+  const [finMsg, setFinMsg] = useState("");
+  const [finReports, setFinReports] = useState<any[]>([]);
   const user = getUser();
 
   const allowedRoles = ["관리자", "org_issuer", "platform_admin"];
@@ -47,6 +52,34 @@ export default function Admin() {
     setTimeout(() => setSettingsSaved(false), 2000);
   };
 
+  const loadFinReports = async (companyId: string) => {
+    if (!companyId) return;
+    const data = await api(`/api/financial-reports/${companyId}`);
+    if (Array.isArray(data)) setFinReports(data);
+  };
+
+  const submitFinancial = async () => {
+    if (!finCompanyId || !finForm.period) {
+      return setFinMsg("❌ 회사와 분기 기간은 필수입니다");
+    }
+    const r = await api("/api/financial-reports", {
+      method: "POST",
+      body: JSON.stringify({ companyId: parseInt(finCompanyId), ...finForm }),
+    });
+    if (r.error) setFinMsg("❌ " + r.error);
+    else {
+      setFinMsg("✅ 실적 저장 완료!");
+      setFinForm({ period: "", revenue: "", operatingProfit: "", netIncome: "", eps: "", notes: "" });
+      loadFinReports(finCompanyId);
+    }
+  };
+
+  const deleteFinReport = async (id: number) => {
+    if (!confirm("삭제하시겠습니까?")) return;
+    await api(`/api/financial-reports/${id}`, { method: "DELETE" });
+    loadFinReports(finCompanyId);
+  };
+
   useEffect(() => {
     loadPending();
     loadCompanies();
@@ -54,7 +87,12 @@ export default function Admin() {
 
   useEffect(() => {
     if (tab === "settings") loadSettings();
+    if (tab === "financial") loadCompanies();
   }, [tab]);
+
+  useEffect(() => {
+    if (finCompanyId) loadFinReports(finCompanyId);
+  }, [finCompanyId]);
 
   const showMsg = (m: string) => {
     setMsg(m);
@@ -106,6 +144,7 @@ export default function Admin() {
     { key: "ipo", label: `📋 IPO 승인${pending.length > 0 ? ` (${pending.length})` : ""}` },
     { key: "market", label: "📊 시장 관리" },
     { key: "settings", label: "⚙️ 거래 설정" },
+    { key: "financial", label: "💹 실적 입력" },
     { key: "notice", label: "📢 공지 관리" },
   ];
 
@@ -363,6 +402,112 @@ export default function Admin() {
           >
             {settingsSaved ? "✅ 저장됨" : "💾 설정 저장"}
           </button>
+        </div>
+      )}
+
+      {/* 실적 입력 탭 */}
+      {tab === "financial" && (
+        <div className="px-4 mt-3 space-y-4 pb-4">
+          {/* 회사 선택 */}
+          <div className="bg-white rounded-2xl shadow-sm p-4">
+            <p className="font-black text-sm text-gray-700 mb-2">🏢 회사 선택</p>
+            <select
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+              value={finCompanyId}
+              onChange={e => setFinCompanyId(e.target.value)}
+            >
+              <option value="">회사를 선택하세요...</option>
+              {companies.map(c => (
+                <option key={c.id} value={c.id}>{c.name} ({c.coin_symbol})</option>
+              ))}
+            </select>
+          </div>
+
+          {finCompanyId && (
+            <>
+              {/* 실적 입력 폼 */}
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <p className="font-black text-sm text-gray-700 mb-3">📝 실적 데이터 입력</p>
+                {finMsg && (
+                  <div className={`mb-3 p-3 rounded-xl text-sm font-medium ${finMsg.startsWith("✅") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                    {finMsg}
+                  </div>
+                )}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">기간 (예: 2025-Q1) *</label>
+                    <input
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                      placeholder="2025-Q1"
+                      value={finForm.period}
+                      onChange={e => setFinForm(p => ({ ...p, period: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ["revenue", "매출"],
+                      ["operatingProfit", "영업이익"],
+                      ["netIncome", "순이익"],
+                      ["eps", "주당순이익(EPS)"],
+                    ].map(([key, label]) => (
+                      <div key={key}>
+                        <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+                        <input type="number"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-400"
+                          placeholder="0"
+                          value={(finForm as any)[key]}
+                          onChange={e => setFinForm(p => ({ ...p, [key]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">비고 (선택)</label>
+                    <textarea
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-400 resize-none"
+                      rows={2}
+                      placeholder="실적 관련 코멘트..."
+                      value={finForm.notes}
+                      onChange={e => setFinForm(p => ({ ...p, notes: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={submitFinancial}
+                  className="w-full mt-3 py-3 bg-indigo-500 text-white rounded-xl font-black text-sm hover:bg-indigo-600 transition"
+                >
+                  💾 실적 저장
+                </button>
+              </div>
+
+              {/* 기존 실적 목록 */}
+              {finReports.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">등록된 실적</p>
+                  {finReports.map(r => (
+                    <div key={r.id} className="bg-white rounded-2xl shadow-sm p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-black text-sm text-gray-800">{r.period}</span>
+                        <button onClick={() => deleteFinReport(r.id)}
+                          className="text-xs text-gray-400 border border-gray-200 rounded-lg px-2 py-1 hover:bg-red-50 hover:text-red-500 transition">
+                          삭제
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        {[["매출", r.revenue], ["영업이익", r.operating_profit], ["순이익", r.net_income], ["EPS", r.eps]].map(([k, v]) => (
+                          <div key={String(k)} className="flex justify-between">
+                            <span className="text-gray-400">{k}</span>
+                            <span className="font-bold text-gray-700">{formatNum(Number(v))}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {r.notes && <p className="text-[10px] text-gray-400 mt-2 bg-gray-50 rounded-lg p-2">{r.notes}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 

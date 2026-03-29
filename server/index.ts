@@ -14,6 +14,8 @@ import newsRoutes from "./routes/news.js";
 import dividendRoutes from "./routes/dividend.js";
 import portfolioRoutes from "./routes/portfolio.js";
 import settingsRoutes from "./routes/settings.js";
+import financialRoutes from "./routes/financial-reports.js";
+import watchlistRoutes from "./routes/watchlist.js";
 import { sql } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +49,33 @@ await sql`
     UNIQUE(organization_id, key)
   )
 `.catch(() => {});
+await sql`
+  CREATE TABLE IF NOT EXISTS investment.financial_reports (
+    id SERIAL PRIMARY KEY,
+    company_id INTEGER NOT NULL REFERENCES investment.companies(id) ON DELETE CASCADE,
+    period TEXT NOT NULL,
+    revenue NUMERIC DEFAULT 0,
+    operating_profit NUMERIC DEFAULT 0,
+    net_income NUMERIC DEFAULT 0,
+    eps NUMERIC DEFAULT 0,
+    notes TEXT,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(company_id, period)
+  )
+`.catch(() => {});
+await sql`
+  CREATE TABLE IF NOT EXISTS investment.watchlists (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    company_id INTEGER NOT NULL REFERENCES investment.companies(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, company_id)
+  )
+`.catch(() => {});
+await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS ipo_start_date TIMESTAMPTZ`.catch(() => {});
+await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS ipo_end_date TIMESTAMPTZ`.catch(() => {});
+await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS subscription_shares INTEGER DEFAULT 0`.catch(() => {});
 
 // 헬스체크
 app.get("/health", (_req, res) => {
@@ -62,6 +91,8 @@ app.use("/api", newsRoutes);
 app.use("/api", dividendRoutes);
 app.use("/api", portfolioRoutes);
 app.use("/api", settingsRoutes);
+app.use("/api", financialRoutes);
+app.use("/api", watchlistRoutes);
 
 // 프로덕션: 클라이언트 정적 파일
 // __dirname = dist/ (tsc 빌드 후), client/dist = ../client/dist

@@ -272,18 +272,51 @@ async function matchOrder(params: {
 
 // ── 주문 접수 ──────────────────────────────────────────────────────
 // POST /orders
+// priceType: "limit"(지정가) | "market"(시장가)
 router.post("/orders", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { companyId, orderType, price, quantity } = req.body;
+    const { companyId, orderType, price, quantity, priceType = "limit" } = req.body;
 
-    if (!companyId || !orderType || !price || !quantity) {
-      return res.status(400).json({ error: "companyId, orderType, price, quantity 필수" });
+    if (!companyId || !orderType || !quantity) {
+      return res.status(400).json({ error: "companyId, orderType, quantity 필수" });
     }
     if (!["BUY", "SELL"].includes(orderType)) {
       return res.status(400).json({ error: "orderType은 BUY 또는 SELL" });
     }
-    if (price <= 0 || quantity <= 0) {
+    if (priceType !== "limit" && priceType !== "market") {
+      return res.status(400).json({ error: "priceType은 limit 또는 market" });
+    }
+
+    // 시장가 주문: 상대방 최우선 호가를 가격으로 사용
+    let resolvedPrice = price;
+    if (priceType === "market") {
+      if (orderType === "BUY") {
+        // 최저 매도 호가
+        const bestSell = await sql`
+          SELECT MIN(price) as best FROM investment.orders
+          WHERE company_id = ${parseInt(companyId)}
+            AND order_type = 'SELL' AND status IN ('OPEN','PARTIAL')
+        `;
+        if (!bestSell[0]?.best) {
+          return res.status(400).json({ error: "시장가 매수 불가: 매도 호가가 없습니다" });
+        }
+        resolvedPrice = parseFloat(bestSell[0].best);
+      } else {
+        // 최고 매수 호가
+        const bestBuy = await sql`
+          SELECT MAX(price) as best FROM investment.orders
+          WHERE company_id = ${parseInt(companyId)}
+            AND order_type = 'BUY' AND status IN ('OPEN','PARTIAL')
+        `;
+        if (!bestBuy[0]?.best) {
+          return res.status(400).json({ error: "시장가 매도 불가: 매수 호가가 없습니다" });
+        }
+        resolvedPrice = parseFloat(bestBuy[0].best);
+      }
+    }
+
+    if (!resolvedPrice || resolvedPrice <= 0 || quantity <= 0) {
       return res.status(400).json({ error: "가격과 수량은 0보다 커야 합니다" });
     }
 
@@ -320,7 +353,7 @@ router.post("/orders", requireAuth, async (req: Request, res: Response) => {
       userId: user.userId,
       companyId: parseInt(companyId),
       orderType,
-      price: parseFloat(price),
+      price: resolvedPrice,
       quantity: parseInt(quantity),
       orgId: companies[0].organization_id,
       assetTypeId: companies[0].asset_type_id,
