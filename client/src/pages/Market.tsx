@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { io as socketIo } from "socket.io-client";
 import { api, formatNum, getUser, getToken } from "../api";
 
 type SortKey = "market_cap" | "volume" | "change_rate" | "name";
@@ -161,10 +162,23 @@ export default function Market({ onSelect, onLogout }: { onSelect: (id: number) 
   };
 
   useEffect(() => { load(); }, []);
+
+  // WebSocket으로 실시간 시장 가격 갱신 (폴링 대체)
   useEffect(() => {
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
-  }, []);
+    const socket = socketIo({ path: "/socket.io" });
+    const orgId = user?.orgId;
+    socket.on("connect", () => {
+      if (orgId) socket.emit("subscribe_org", orgId);
+    });
+    // 거래 체결 또는 신규 상장 시 시장 목록 갱신
+    socket.on("market_updated", () => {
+      api("/api/companies").then(data => {
+        if (Array.isArray(data)) setCompanies(data);
+      });
+    });
+    socket.on("company_listed", () => load());
+    return () => { socket.disconnect(); };
+  }, [user?.orgId]);
 
   const toggleWatchlist = async (companyId: number, e: React.MouseEvent) => {
     e.stopPropagation();

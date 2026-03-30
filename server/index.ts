@@ -76,6 +76,17 @@ await sql`
 await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS ipo_start_date TIMESTAMPTZ`.catch(() => {});
 await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS ipo_end_date TIMESTAMPTZ`.catch(() => {});
 await sql`ALTER TABLE investment.companies ADD COLUMN IF NOT EXISTS subscription_shares INTEGER DEFAULT 0`.catch(() => {});
+await sql`
+  CREATE TABLE IF NOT EXISTS investment.order_escrow (
+    id SERIAL PRIMARY KEY,
+    order_id INT NOT NULL REFERENCES investment.orders(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    asset_type_id INT NOT NULL,
+    locked_amount NUMERIC NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(order_id)
+  )
+`.catch(() => {});
 
 // 헬스체크
 app.get("/health", (_req, res) => {

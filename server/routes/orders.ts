@@ -106,6 +106,23 @@ async function matchOrder(params: {
     );
     const myOrderId = orderRes.rows[0].id;
 
+    // 4-1. [에스크로] 매수 주문 시 주문 금액을 지갑에서 즉시 차감하여 에스크로에 보관
+    //      → 이후 체결 시 에스크로에서 판매자에게 직접 이전, 취소 시 에스크로 반환
+    if (orderType === "BUY") {
+      const lockAmount = price * quantity;
+      await client.query(
+        `UPDATE economy.wallets SET balance = balance - $1
+         WHERE user_id = $2 AND asset_type_id = $3`,
+        [lockAmount, userId, assetTypeId]
+      );
+      await client.query(
+        `INSERT INTO investment.order_escrow (order_id, user_id, asset_type_id, locked_amount)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (order_id) DO UPDATE SET locked_amount = $4`,
+        [myOrderId, userId, assetTypeId, lockAmount]
+      );
+    }
+
     // 5. 상대 주문 탐색 (가격/시간 우선)
     const oppositeType = orderType === "BUY" ? "SELL" : "BUY";
     const matchRes = await client.query(
@@ -119,7 +136,6 @@ async function matchOrder(params: {
 
     let remaining = quantity;
     let lastPrice: number | null = null;
-    const coinTransfers: Array<() => Promise<void>> = [];
 
     for (const match of matchRes.rows) {
       if (remaining <= 0) break;
@@ -128,9 +144,13 @@ async function matchOrder(params: {
       const execPrice = parseFloat(match.price);
       const totalAmount = execPrice * matchQty;
       const fee = Math.floor(totalAmount * feeRate * 100) / 100;
+      const netAmount = totalAmount - fee;
 
       const buyerId = orderType === "BUY" ? userId : match.user_id;
       const sellerId = orderType === "SELL" ? userId : match.user_id;
+      // 체결에 사용된 BUY 주문의 ID와 가격
+      const buyOrderId = orderType === "BUY" ? myOrderId : match.id;
+      const buyOrderPrice = orderType === "BUY" ? price : parseFloat(match.price);
 
       // 체결 기록
       await client.query(
@@ -147,13 +167,11 @@ async function matchOrder(params: {
       );
 
       // 주식 소유권 이전
-      // 판매자 차감
       await client.query(
         `UPDATE investment.ownership SET quantity = quantity - $1
          WHERE user_id::text=$2 AND company_id=$3`,
         [matchQty, sellerId, companyId]
       );
-      // 구매자 증가
       await client.query(
         `INSERT INTO investment.ownership (user_id, company_id, quantity)
          VALUES ($1::uuid, $2, $3)
@@ -161,42 +179,45 @@ async function matchOrder(params: {
         [buyerId, companyId, matchQty]
       );
 
+      // ── [에스크로] 코인 정산 (트랜잭션 내에서 직접 처리) ──────────────────
+      // 1) 에스크로 잠금 금액 감소 (buyOrderPrice × matchQty 만큼 사용됨)
+      const escrowed = buyOrderPrice * matchQty;
+      await client.query(
+        `UPDATE investment.order_escrow
+         SET locked_amount = locked_amount - $1
+         WHERE order_id = $2`,
+        [escrowed, buyOrderId]
+      );
+
+      // 2) 지정가 BUY 주문이 더 낮은 가격에 체결된 경우 차액 환급
+      const priceDiff = (buyOrderPrice - execPrice) * matchQty;
+      if (priceDiff > 0.0001) {
+        await client.query(
+          `UPDATE economy.wallets SET balance = balance + $1
+           WHERE user_id = $2 AND asset_type_id = $3`,
+          [priceDiff, buyerId, assetTypeId]
+        );
+      }
+
+      // 3) 판매자에게 순수익(체결금액 - 수수료) 지급
+      await client.query(
+        `UPDATE economy.wallets SET balance = balance + $1
+         WHERE user_id = $2 AND asset_type_id = $3`,
+        [netAmount, sellerId, assetTypeId]
+      );
+
+      // 4) 수수료를 회사 지갑으로 이전 (실패해도 무시)
+      if (fee > 0.0001) {
+        await client.query(
+          `UPDATE economy.wallets SET balance = balance + $1
+           WHERE user_id = 'company:' || $2::text AND asset_type_id = $3`,
+          [fee, companyId, assetTypeId]
+        ).catch(() => {});
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       remaining -= matchQty;
       lastPrice = execPrice;
-
-      // 코인 이전은 커밋 후 실행 (DB 트랜잭션과 분리)
-      const reqId = `trade-${companyId}-${buyerId}-${sellerId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const netAmount = totalAmount - fee;
-      const _buyerId = buyerId;
-      const _sellerId = sellerId;
-      const _reqId = reqId;
-      const _netAmount = netAmount;
-      const _fee = fee;
-      const _assetTypeId = assetTypeId;
-      const _companyId = companyId;
-
-      coinTransfers.push(async () => {
-        // 구매자 → 판매자
-        await transferCoin({
-          fromUserId: _buyerId,
-          toUserId: _sellerId,
-          assetTypeId: _assetTypeId,
-          amount: _netAmount,
-          description: `주식 체결: ${_companyId}번 회사 ${matchQty}주 @ ${execPrice}`,
-          requestId: _reqId,
-        });
-        // 수수료 → 회사 지갑
-        if (_fee > 0) {
-          await transferCoin({
-            fromUserId: _buyerId,
-            toUserId: `company:${_companyId}`,
-            assetTypeId: _assetTypeId,
-            amount: _fee,
-            description: `거래 수수료 (${_companyId}번 회사)`,
-            requestId: `${_reqId}-fee`,
-          }).catch(() => {}); // 수수료 실패는 무시
-        }
-      });
     }
 
     // 내 주문 잔량 업데이트
@@ -261,11 +282,6 @@ async function matchOrder(params: {
 
     await client.query("COMMIT");
 
-    // 커밋 후 코인 이전 실행
-    for (const transfer of coinTransfers) {
-      await transfer().catch((e) => console.error("[Stock] 코인 이전 실패:", e.message));
-    }
-
     // WebSocket 실시간 알림
     try {
       const io = getIo();
@@ -274,6 +290,10 @@ async function matchOrder(params: {
           companyId,
           price: lastPrice,
           quantity: quantity - remaining,
+        });
+        // 시장 화면 실시간 갱신
+        io.to(`org_${orgId}`).emit("market_updated", {
+          companyId, price: lastPrice,
         });
       }
       io.to(`company_${companyId}`).emit("orderbook_updated", { companyId });
@@ -443,20 +463,64 @@ router.get("/orders/my", requireAuth, async (req: Request, res: Response) => {
 // 주문 취소
 // DELETE /orders/:orderId
 router.delete("/orders/:orderId", requireAuth, async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const user = (req as any).user;
-    const result = await sql`
-      UPDATE investment.orders
-      SET status = 'CANCELLED'
-      WHERE id = ${parseInt(req.params.orderId)}
-        AND user_id = ${user.userId}::uuid
-        AND status IN ('OPEN', 'PARTIAL')
-      RETURNING *
-    `;
-    if (result.length === 0) return res.status(404).json({ error: "취소할 수 없는 주문" });
+    const orderId = parseInt(req.params.orderId);
+
+    await client.query("BEGIN");
+
+    // 주문 취소 처리
+    const result = await client.query(
+      `UPDATE investment.orders
+       SET status = 'CANCELLED'
+       WHERE id = $1
+         AND user_id = $2::uuid
+         AND status IN ('OPEN', 'PARTIAL')
+       RETURNING *`,
+      [orderId, user.userId]
+    );
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "취소할 수 없는 주문" });
+    }
+
+    const order = result.rows[0];
+
+    // [에스크로] 매수 주문 취소 시 남은 에스크로 잔액 환불
+    if (order.order_type === "BUY") {
+      const escrowRes = await client.query(
+        `SELECT locked_amount, asset_type_id FROM investment.order_escrow WHERE order_id = $1`,
+        [orderId]
+      );
+      const escrow = escrowRes.rows[0];
+      if (escrow && parseFloat(escrow.locked_amount) > 0) {
+        await client.query(
+          `UPDATE economy.wallets
+           SET balance = balance + $1
+           WHERE user_id = $2 AND asset_type_id = $3`,
+          [escrow.locked_amount, user.userId, escrow.asset_type_id]
+        );
+        await client.query(
+          `DELETE FROM investment.order_escrow WHERE order_id = $1`,
+          [orderId]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+
+    // 호가창 갱신 알림
+    try {
+      getIo().to(`company_${order.company_id}`).emit("orderbook_updated", { companyId: order.company_id });
+    } catch {}
+
     res.json({ success: true });
   } catch (e: any) {
+    await client.query("ROLLBACK");
     res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
   }
 });
 
