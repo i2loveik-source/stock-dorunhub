@@ -37,7 +37,11 @@ export async function api(path: string, options: RequestInit = {}): Promise<any>
   const data = await res.json();
   if (res.status === 401) {
     clearToken();
-    window.location.href = "/";
+    // /api/auth/ 경로는 SSO 교환 중에 호출되므로 리다이렉트 금지
+    // (iframe에서 "/" 리다이렉트 시 sso_token이 사라져 무한 루프 발생)
+    if (!path.startsWith("/api/auth/")) {
+      window.location.href = "/";
+    }
   }
   return data;
 }

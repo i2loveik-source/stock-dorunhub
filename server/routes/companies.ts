@@ -58,7 +58,7 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
         LEFT JOIN investment.market_price mp ON c.id = mp.company_id
         LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
         LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
-        WHERE c.organization_id = $1 AND c.status != 'pending'
+        WHERE c.organization_id = $1 AND c.status IN ('listed', 'suspended')
         ORDER BY CASE c.status WHEN 'listed' THEN 0 WHEN 'suspended' THEN 1 ELSE 2 END,
           c.listed_at DESC NULLS LAST
       `;
@@ -81,7 +81,7 @@ router.get("/companies", requireAuth, async (req: Request, res: Response) => {
         LEFT JOIN investment.market_price mp ON c.id = mp.company_id
         LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
         LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
-        WHERE c.status != 'pending'
+        WHERE c.status IN ('listed', 'suspended')
         ORDER BY CASE c.status WHEN 'listed' THEN 0 WHEN 'suspended' THEN 1 ELSE 2 END,
           c.listed_at DESC NULLS LAST
       `;
@@ -389,6 +389,121 @@ router.post("/companies/:id/delist", requireAuth, async (req: Request, res: Resp
       SET status = 'delisted', suspend_reason = ${reason || "관리자 상장폐지"}
       WHERE id = ${id}
     `;
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 관리자용 전체 회사 목록 (상장폐지 포함)
+// GET /companies/admin/all?orgId=
+router.get("/companies/admin/all", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!["관리자", "org_issuer", "platform_admin"].includes(user.role)) {
+      return res.status(403).json({ error: "관리자만 접근 가능" });
+    }
+    const orgId = parseInt(req.query.orgId as string) || user.organizationId;
+    const companies = orgId
+      ? await sql`
+          SELECT c.*, mp.current_price,
+            CASE WHEN mp.prev_price > 0
+              THEN ROUND(((mp.current_price - mp.prev_price) / mp.prev_price * 100)::numeric, 2)
+              ELSE 0 END as change_rate,
+            CONCAT(u.last_name, u.first_name) as ceo_name, u.username as ceo_username,
+            at.symbol as coin_symbol
+          FROM investment.companies c
+          LEFT JOIN investment.market_price mp ON c.id = mp.company_id
+          LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
+          LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
+          WHERE c.organization_id = ${orgId}
+          ORDER BY c.created_at DESC
+        `
+      : await sql`
+          SELECT c.*, mp.current_price,
+            CASE WHEN mp.prev_price > 0
+              THEN ROUND(((mp.current_price - mp.prev_price) / mp.prev_price * 100)::numeric, 2)
+              ELSE 0 END as change_rate,
+            CONCAT(u.last_name, u.first_name) as ceo_name, u.username as ceo_username,
+            at.symbol as coin_symbol, s.name as org_name
+          FROM investment.companies c
+          LEFT JOIN investment.market_price mp ON c.id = mp.company_id
+          LEFT JOIN public.users u ON c.ceo_user_id::text = u.id
+          LEFT JOIN economy.asset_types at ON c.asset_type_id = at.id
+          LEFT JOIN public.organizations s ON s.id = c.organization_id
+          ORDER BY c.created_at DESC
+        `;
+    res.json(companies);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 회사 정보 수정 (관리자)
+// PUT /companies/:id
+router.put("/companies/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!["관리자", "org_issuer", "platform_admin"].includes(user.role)) {
+      return res.status(403).json({ error: "관리자만 가능합니다" });
+    }
+    const id = parseInt(req.params.id);
+    const { name, description, businessPlan, logoEmoji, logoUrl, status, suspendReason } = req.body;
+
+    // 유효한 status 값 검증
+    const validStatuses = ["listed", "suspended", "delisted"];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: "유효하지 않은 상태값" });
+    }
+
+    await sql`
+      UPDATE investment.companies
+      SET
+        name = COALESCE(${name || null}, name),
+        description = COALESCE(${description ?? null}, description),
+        business_plan = COALESCE(${businessPlan ?? null}, business_plan),
+        logo_emoji = COALESCE(${logoEmoji || null}, logo_emoji),
+        logo_url = COALESCE(${logoUrl ?? null}, logo_url),
+        status = COALESCE(${status || null}, status),
+        suspend_reason = COALESCE(${suspendReason ?? null}, suspend_reason),
+        updated_at = NOW()
+      WHERE id = ${id}
+    `;
+
+    // 상장폐지 시 미체결 주문 취소
+    if (status === "delisted") {
+      await sql`
+        UPDATE investment.orders SET status = 'CANCELLED'
+        WHERE company_id = ${id} AND status IN ('OPEN', 'PARTIAL')
+      `;
+    }
+
+    const updated = await sql`SELECT * FROM investment.companies WHERE id = ${id}`;
+    res.json({ success: true, company: updated[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 회사 삭제 (관리자 — 하드 삭제, 관련 데이터 모두 삭제)
+// DELETE /companies/:id
+router.delete("/companies/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!["관리자", "org_issuer", "platform_admin"].includes(user.role)) {
+      return res.status(403).json({ error: "관리자만 가능합니다" });
+    }
+    const id = parseInt(req.params.id);
+
+    // 연관 데이터 순서대로 삭제
+    await sql`DELETE FROM investment.orders WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.trades WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.ownership WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.market_price WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.financial_reports WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.watchlists WHERE company_id = ${id}`;
+    await sql`DELETE FROM investment.companies WHERE id = ${id}`;
+
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
