@@ -67,7 +67,7 @@ async function matchOrder(params: {
       }
     }
 
-    // 3. 매수 주문 시 잔액 확인 (대략)
+    // 3. 매수 주문 시 잔액 확인 (기존 미체결 매수 주문 홀딩분 차감 후 가용 잔액 계산)
     if (orderType === "BUY") {
       const balRes = await client.query(
         `SELECT COALESCE(balance, 0) as balance FROM economy.wallets
@@ -75,8 +75,26 @@ async function matchOrder(params: {
         [userId, assetTypeId]
       );
       const balance = parseFloat(balRes.rows[0]?.balance || "0");
-      if (balance < price * quantity) {
-        throw new Error(`코인 잔액 부족 (보유: ${balance}, 필요: ${price * quantity})`);
+
+      // 이미 미체결 매수 주문으로 묶인 금액 (= price * remaining_qty 합산)
+      const holdingRes = await client.query(
+        `SELECT COALESCE(SUM(price * remaining_qty), 0) as holding
+         FROM investment.orders o
+         JOIN investment.companies c ON o.company_id = c.id
+         WHERE o.user_id::text = $1
+           AND o.order_type = 'BUY'
+           AND o.status IN ('OPEN', 'PARTIAL')
+           AND c.asset_type_id = $2`,
+        [userId, assetTypeId]
+      );
+      const holdingAmount = parseFloat(holdingRes.rows[0]?.holding || "0");
+      const available = balance - holdingAmount;
+      const required = price * quantity;
+
+      if (available < required) {
+        throw new Error(
+          `가용 잔액 부족 (보유: ${balance.toLocaleString("ko-KR")}, 주문 홀딩: ${holdingAmount.toLocaleString("ko-KR")}, 가용: ${available.toLocaleString("ko-KR")}, 필요: ${required.toLocaleString("ko-KR")})`
+        );
       }
     }
 

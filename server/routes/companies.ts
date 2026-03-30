@@ -279,12 +279,30 @@ router.post("/companies", requireAuth, async (req: Request, res: Response) => {
     if (ipoPrice < 1) return res.status(400).json({ error: "IPO 가격은 1 이상이어야 합니다" });
     const shares = Math.max(100, Math.min(10000, parseInt(totalShares) || 1000));
 
+    // organizationId가 토큰에 없을 경우 DB에서 직접 조회
+    let organizationId = user.organizationId;
+    if (!organizationId) {
+      const userRow = await sql`
+        SELECT COALESCE(uo.organization_id, u.organization_id) as org_id
+        FROM public.users u
+        LEFT JOIN public.user_organizations uo
+          ON uo.user_id::text = u.id::text AND uo.is_approved = true
+          AND uo.organization_id = u.organization_id
+        WHERE u.id::text = ${user.userId}
+        LIMIT 1
+      `;
+      organizationId = userRow[0]?.org_id || null;
+    }
+    if (!organizationId) {
+      return res.status(400).json({ error: "소속 조직 정보가 없습니다. 관리자에게 문의하세요." });
+    }
+
     const company = await sql`
       INSERT INTO investment.companies
         (name, ceo_user_id, organization_id, asset_type_id, description, business_plan,
          total_shares, available_shares, ipo_price, logo_emoji, logo_url)
       VALUES
-        (${name}, ${user.userId}::uuid, ${user.organizationId}, ${assetTypeId},
+        (${name}, ${user.userId}::uuid, ${organizationId}, ${assetTypeId},
          ${description || ""}, ${businessPlan || ""},
          ${shares}, ${shares}, ${ipoPrice}, ${logoEmoji || "🏢"}, ${logoUrl || null})
       RETURNING *

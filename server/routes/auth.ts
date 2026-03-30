@@ -111,14 +111,16 @@ router.get("/auth/sso", async (req: Request, res: Response) => {
 
     const u = users[0];
     const userInfo = buildUserResponse(u);
+    // DB에 조직이 없으면 SSO 토큰의 조직 ID 사용 (DoRunHub에서 전달한 activeOrgId)
+    const finalOrgId = userInfo.orgId || decoded.organizationId || null;
     const token = generateStockToken({
       userId: u.id,
       role: userInfo.role,
-      organizationId: userInfo.orgId,
+      organizationId: finalOrgId,
       username: u.username,
     });
 
-    res.json({ token, user: userInfo });
+    res.json({ token, user: { ...userInfo, orgId: finalOrgId } });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
