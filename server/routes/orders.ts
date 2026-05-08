@@ -3,6 +3,7 @@ import { requireAuth } from "../auth.js";
 import { sql, pool } from "../db.js";
 import { transferCoin } from "../coinApi.js";
 import { getIo } from "../socket.js";
+import { pushHubActivity } from "../hubActivity.js";
 
 const router = Router();
 
@@ -23,6 +24,9 @@ async function matchOrder(params: {
 }) {
   const { userId, companyId, orderType, price, quantity, orgId, assetTypeId, feeRate = FEE_RATE } = params;
   const client = await pool.connect();
+
+  // 체결 시 허브 타임라인에 push할 이벤트 누적
+  const tradeEvents: { userId: string; counterpartyId: string; qty: number; price: number; isBuyer: boolean; tradeKey: string }[] = [];
 
   try {
     await client.query("BEGIN");
@@ -153,10 +157,15 @@ async function matchOrder(params: {
       const buyOrderPrice = orderType === "BUY" ? price : parseFloat(match.price);
 
       // 체결 기록
-      await client.query(
+      const tradeIns = await client.query(
         `INSERT INTO investment.trades (company_id, buyer_id, seller_id, price, quantity, fee)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [companyId, buyerId, sellerId, execPrice, matchQty, fee]
+      );
+      const tradeId = tradeIns.rows[0]?.id;
+      tradeEvents.push(
+        { userId: buyerId, counterpartyId: sellerId, qty: matchQty, price: execPrice, isBuyer: true, tradeKey: `trade:${tradeId}:b` },
+        { userId: sellerId, counterpartyId: buyerId, qty: matchQty, price: execPrice, isBuyer: false, tradeKey: `trade:${tradeId}:s` },
       );
 
       // 상대 주문 잔량 감소
@@ -298,6 +307,29 @@ async function matchOrder(params: {
       }
       io.to(`company_${companyId}`).emit("orderbook_updated", { companyId });
     } catch {}
+
+    // 허브 타임라인 push (회사명 조회 후 사용자별 카드 생성)
+    if (tradeEvents.length > 0) {
+      try {
+        const cRes = await pool.query(
+          `SELECT name, ticker FROM investment.companies WHERE id = $1`,
+          [companyId]
+        );
+        const cname = cRes.rows[0]?.name || `종목 #${companyId}`;
+        const ticker = cRes.rows[0]?.ticker ? ` (${cRes.rows[0].ticker})` : "";
+        const fmt = (n: number) => n.toLocaleString("ko-KR");
+        pushHubActivity(tradeEvents.map(t => ({
+          userId: t.userId,
+          title: `${cname}${ticker} ${t.isBuyer ? "매수" : "매도"} 체결`,
+          body: `${fmt(t.qty)}주 @ ${fmt(t.price)}원 (총 ${fmt(t.qty * t.price)}원)`,
+          href: "/localStock",
+          metadata: { companyId, qty: t.qty, price: t.price, side: t.isBuyer ? "BUY" : "SELL" },
+          dedupeKey: t.tradeKey,
+        })));
+      } catch (err) {
+        console.warn("[orders] hub activity push:", (err as any)?.message);
+      }
+    }
 
     return { success: true, filled: quantity - remaining, remaining, orderId: myOrderId };
   } catch (e) {

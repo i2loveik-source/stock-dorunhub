@@ -3,6 +3,7 @@ import { requireAuth } from "../auth.js";
 import { sql, pool } from "../db.js";
 import { createCompanyWallet } from "../coinApi.js";
 import { getIo } from "../socket.js";
+import { pushHubActivity } from "../hubActivity.js";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -187,6 +188,7 @@ router.get("/companies/my-coins", requireAuth, async (req: Request, res: Respons
           AND at.type IN ('community', 'sub')
           AND at.symbol NOT LIKE '%\_V' ESCAPE '\\'
           AND at.symbol NOT LIKE '%\_C' ESCAPE '\\'
+          AND at.symbol NOT LIKE '%\_P' ESCAPE '\\'
         ORDER BY s.name, at.id
       `;
       return res.json(coins);
@@ -360,6 +362,29 @@ router.post("/companies/:id/approve", requireAuth, async (req: Request, res: Res
         ipoPrice: company.ipo_price,
       });
     } catch {}
+
+    // 허브 타임라인 push (조직 구성원 전체 — CEO에게는 별도 메시지)
+    try {
+      const members = await sql`
+        SELECT user_id::text AS user_id FROM user_organizations
+        WHERE organization_id = ${company.organization_id} AND is_approved = true
+      `;
+      const ceoId = String(company.ceo_user_id);
+      const fmt = (n: number) => Number(n).toLocaleString("ko-KR");
+      const events = members.map((m: any) => ({
+        userId: m.user_id,
+        title: m.user_id === ceoId
+          ? `${company.name} 상장 승인 — IPO 완료`
+          : `신규 상장: ${company.name}`,
+        body: `공모가 ${fmt(company.ipo_price)}원 · 총 ${fmt(company.total_shares)}주`,
+        href: "/localStock",
+        metadata: { companyId: id, ipoPrice: company.ipo_price },
+        dedupeKey: `company_listed:${id}`,
+      }));
+      pushHubActivity(events);
+    } catch (err) {
+      console.warn("[approve] hub activity:", (err as any)?.message);
+    }
 
     res.json({ success: true });
   } catch (e: any) {
